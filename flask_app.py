@@ -3,10 +3,10 @@ import subprocess
 import os
 import logging
 import threading
-import zmq # Import ZeroMQ
-import time # Import time for sleep
+import zmq 
+import time 
 
-app = Flask(__name__) # Corrected __nu"me" to __name__
+app = Flask(__name__) 
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
