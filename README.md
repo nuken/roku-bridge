@@ -14,7 +14,6 @@ This Flask application combines multiple Channels DVR live streams into a single
 
 1.  **Download and Extract the Project:**
 
-      * Go to your GitHub repository page.
       * Click the green "Code" button.
       * Select "Download ZIP".
       * Extract the contents of the ZIP file to a folder on your computer.
