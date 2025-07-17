@@ -39,7 +39,7 @@ EXPOSE 5001
 
 # Define environment variables for the Flask app (optional, but good practice)
 # These can be overridden when running the container using -e
-ENV CDVR_HOST="192.168.86.64"
+ENV CDVR_HOST="192.168.51.84"
 ENV CDVR_PORT="8089"
 # Default to software encoding. Change to 'h264_qsv' if QSV is properly configured on host and container.
 ENV CODEC="libx264"
@@ -49,4 +49,4 @@ ENV CODEC="libx264"
 # -w 1 means 1 worker process. For simple use cases, this is fine.
 # For multi-client scenarios, you'd need a more advanced ZeroMQ setup or a single-worker model.
 # Increased timeout to 60 seconds (default is usually 30)
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5001", "--timeout", "120", "flask_app:app"]
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5001", "--timeout", "120", "--log-level", "debug", "--capture-output", "flask_app:app"]
