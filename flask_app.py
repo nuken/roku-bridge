@@ -3,10 +3,10 @@ import subprocess
 import os
 import logging
 import threading
-import zmq 
-import time 
+import zmq
+import time
 
-app = Flask(__name__) 
+app = Flask(__name__)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,8 +23,7 @@ BW = '5120k'
 
 # ZeroMQ configuration for FFmpeg control
 ZMQ_FFMPEG_PORT = 5555 # Port FFmpeg will listen on for commands
-zmq_context = zmq.Context()
-zmq_socket = None # This will be the REQ socket to send commands to FFmpeg
+# Removed global zmq_context and zmq_socket
 
 # Global to store the active video track for highlighting (defaults to 0)
 current_active_video_track = 0
@@ -40,7 +39,7 @@ def combine_streams():
     Channels are specified via 'ch' query parameters (e.g., /combine?ch=1&ch=2).
     Supports up to 4 channels.
     """
-    global zmq_socket, current_active_video_track
+    global current_active_video_track # current_active_video_track can remain global if it's a shared preference
 
     channels_raw = request.args.getlist('ch')
     if not channels_raw:
@@ -112,9 +111,9 @@ def combine_streams():
         f"{''.join(audio_input_labels)}amix=inputs={num_inputs}:dropout_transition=0:duration=first[mixed_audio]"
     )
 
-    # Corrected azmq filter syntax for control option
+    # Corrected azmq filter syntax: passing 'control=1' as a URL query parameter
     audio_filter_parts.append(
-        f"[mixed_audio]azmq=bind_address='tcp://127.0.0.1:{ZMQ_FFMPEG_PORT}':control=1[audio_out]"
+        f"[mixed_audio]azmq=bind_address=tcp://127.0.0.1:{ZMQ_FFMPEG_PORT}?control=1[audio_out]"
     )
 
     filter_complex = ';'.join(video_filter_parts + audio_filter_parts)
@@ -133,41 +132,47 @@ def combine_streams():
     logger.info(f"Starting FFmpeg with command: {' '.join(ffmpeg_cmd)}")
 
     def generate():
+        local_zmq_context = None
+        local_zmq_socket = None
         process = None
+        logger.info("Entering generate() function.")
         try:
-            # Create a REQ socket for sending commands to FFmpeg
-            zmq_socket = zmq_context.socket(zmq.REQ)
-            zmq_socket.connect(f"tcp://127.0.0.1:{ZMQ_FFMPEG_PORT}")
+            logger.info("Initializing ZeroMQ context.")
+            local_zmq_context = zmq.Context()
+            local_zmq_socket = local_zmq_context.socket(zmq.REQ)
+            # Set a timeout for receive operations to prevent hanging
+            local_zmq_socket.setsockopt(zmq.RCVTIMEO, 2000) # 2 seconds timeout for receiving
+
+            logger.info(f"Attempting to connect ZeroMQ socket to tcp://127.0.0.1:{ZMQ_FFMPEG_PORT}")
+            local_zmq_socket.connect(f"tcp://127.0.0.1:{ZMQ_FFMPEG_PORT}")
             logger.info(f"ZeroMQ socket connected to FFmpeg at tcp://127.0.0.1:{ZMQ_FFMPEG_PORT}")
 
-            # Start the FFmpeg subprocess, capturing stdout and stderr
+            logger.info("Starting FFmpeg subprocess.")
             process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             logger.info("FFmpeg process started.")
 
             # Give FFmpeg a moment to initialize the ZeroMQ listener
-            time.sleep(0.5) # A small delay, adjust if needed
+            # Consider increasing this if connection issues persist, or rely more on ZeroMQ timeouts.
+            time.sleep(1.0) # Increased sleep slightly for robustness
 
-            # Send initial highlight command to ensure it matches current_active_video_track
+            # Send initial highlight command
             initial_highlight_commands = []
             for i in range(num_inputs):
-                # Ensure each drawbox filter is referenced by its unique label 'v0', 'v1', etc.
-                # The command format is 'filter_label option_name value'
                 initial_highlight_commands.append(
                     f"drawbox@v{i} enable {1 if i == current_active_video_track else 0}"
                 )
+            logger.info("Sending initial highlight commands to FFmpeg.")
             for cmd in initial_highlight_commands:
                 try:
-                    zmq_socket.send_string(cmd)
-                    # For initial commands, using NOBLOCK might be too aggressive if FFmpeg is still very busy.
-                    # A small delay and then recv_string without NOBLOCK is safer, or catch Again.
-                    # Given the delay above, a blocking recv_string should now work.
-                    response = zmq_socket.recv_string()
+                    local_zmq_socket.send_string(cmd)
+                    response = local_zmq_socket.recv_string() # This will now respect RCVTIMEO
                     logger.info(f"Initial highlight command response for '{cmd}': {response}")
                 except zmq.error.Again:
-                    logger.warning(f"FFmpeg not ready to receive command (again): {cmd}")
+                    logger.warning(f"FFmpeg did not respond to command '{cmd}' within timeout. (zmq.error.Again)")
                 except Exception as e:
                     logger.error(f"Error sending initial highlight command: {cmd}, {e}")
 
+            logger.info("Starting to stream video chunks.")
             # Stream the video chunks
             while True:
                 chunk = process.stdout.read(1024 * 16)
@@ -188,19 +193,24 @@ def combine_streams():
             logger.error(f"FFmpeg executable not found. Please ensure FFmpeg is installed and in the system's PATH. Command attempted: {' '.join(ffmpeg_cmd)}")
             yield "FFmpeg not found. Please ensure it is installed and accessible.".encode('utf-8')
         except zmq.error.ZMQError as e:
-            logger.error(f"ZeroMQ error during FFmpeg control: {e}")
+            logger.error(f"ZeroMQ error during FFmpeg control: {e}", exc_info=True)
             yield f"ZeroMQ error: {e}".encode('utf-8')
         except Exception as e:
             logger.error(f"An unexpected error occurred while running FFmpeg: {e}", exc_info=True)
             yield f"An internal server error occurred: {e}".encode('utf-8')
         finally:
+            logger.info("Entering finally block for FFmpeg process cleanup.")
             if process and process.poll() is None:
                 logger.warning("FFmpeg process still running, terminating it in finally block.")
                 process.kill()
                 process.wait()
-            if zmq_socket and not zmq_socket.closed:
-                logger.info("Closing ZeroMQ socket.")
-                zmq_socket.close()
+            if local_zmq_socket and not local_zmq_socket.closed:
+                logger.info("Closing ZeroMQ socket for this stream.")
+                local_zmq_socket.close()
+            if local_zmq_context:
+                local_zmq_context.term() # Terminate the context when done
+                logger.info("ZeroMQ context terminated for this stream.")
+            logger.info("Exiting generate() function.")
 
     return Response(stream_with_context(generate()), mimetype='video/MP2T')
 
@@ -210,7 +220,7 @@ def switch_stream():
     Endpoint to switch the active audio and video highlight for the currently streaming FFmpeg process.
     Expects 'track_index' (0-3) as a JSON payload.
     """
-    global zmq_socket, current_active_video_track
+    global current_active_video_track
 
     if not request.is_json:
         return "Request must be JSON", 400
@@ -222,33 +232,13 @@ def switch_stream():
         return "Invalid 'track_index'. Must be an integer between 0 and 3.", 400
 
     current_active_video_track = track_index
+    logger.info(f"Updated current_active_video_track to {track_index}. This will affect new streams.")
 
-    if not zmq_socket or zmq_socket.closed:
-        logger.warning("ZeroMQ socket to FFmpeg is not active. Is an FFmpeg stream running?")
-        return "FFmpeg stream not active or ZeroMQ socket not initialized.", 503
-
-    try:
-        commands = []
-        for i in range(4):
-            commands.append(f"volume@a{i} enable {1 if i == track_index else 0}")
-            commands.append(f"drawbox@v{i} enable {1 if i == track_index else 0}")
-
-        for cmd in commands:
-            logger.info(f"Sending FFmpeg command: {cmd}")
-            zmq_socket.send_string(cmd)
-            response = zmq_socket.recv_string()
-            logger.info(f"FFmpeg response for '{cmd}': {response}")
-            if response != "Success":
-                return f"Failed to send FFmpeg command: {cmd}. Response: {response}", 500
-
-        return f"Stream switched to track {track_index} with highlight.", 200
-
-    except zmq.error.ZMQError as e:
-        logger.error(f"ZeroMQ communication error: {e}", exc_info=True)
-        return f"ZeroMQ communication error: {e}", 500
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during stream switch: {e}", exc_info=True)
-        return f"An internal server error occurred: {e}", 500
+    # Explicitly indicate that this endpoint cannot control live streams without re-architecture.
+    return "Stream control for active streams is not directly available with the current architecture. " \
+           "This update sets the default for new streams only. To control active streams, " \
+           "a mechanism to link /switch_stream requests to specific active /combine streams (e.g., using stream IDs) " \
+           "and their ZeroMQ sockets would be required.", 501
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
