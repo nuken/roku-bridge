@@ -163,7 +163,7 @@ def combine_streams():
         # Corrected azmq filter syntax: Explicitly escape colons and slashes in bind_address and use tcp://*:PORT
         azmq_audio_options = []
         # Use double backslashes to escape, and use tcp://*:PORT
-        azmq_audio_options.append(f"bind_address=tcp\\://\\*\\:{audio_zmq_ports[i]}")
+        azmq_audio_options.append(f"bind_address=tcp\\\\\\://\\*\\\\\\:{audio_zmq_ports[i]}") # Corrected escaping
         azmq_audio_options.append("control=1")
 
         audio_filter_parts.append(
