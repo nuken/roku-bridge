@@ -95,7 +95,8 @@ def combine_streams():
     video_zmq_port, audio_zmq_ports = get_available_zmq_ports(num_inputs)
 
     # FFmpeg command base with analyzeduration and probesize for robustness
-    ffmpeg_cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'info', '-analyzeduration', '10M', '-probesize', '10M']
+    # Changed loglevel to 'debug' for more detailed output
+    ffmpeg_cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'debug', '-analyzeduration', '10M', '-probesize', '10M']
 
     for url in urls:
         ffmpeg_cmd += ['-i', url]
@@ -140,12 +141,10 @@ def combine_streams():
         return f"Unsupported number of channels: {num_inputs}. Max 4 channels allowed.", 500
 
     # Add a ZMQ filter to the end of the video filtergraph for control
-    # Corrected: Join ZMQ options with ':' instead of ','
     zmq_video_options = []
     zmq_video_options.append(f"bind_address=tcp\\\\\\://\\*\\\\\\:{video_zmq_port}")
-    zmq_video_options.append("control=1")
     video_filter_parts.append(
-        f"[final_video_xstack]zmq={':'.join(zmq_video_options)}@video_control[final_video]" # Changed join from ',' to ':'
+        f"[final_video_xstack]zmq={':'.join(zmq_video_options)}@video_control[final_video]"
     )
 
     # --- Audio Filtergraph (for dynamic switching) ---
@@ -153,21 +152,21 @@ def combine_streams():
     audio_input_labels_for_amix = [] # These will be the outputs of individual azmq filters
 
     for i in range(num_inputs):
-        # volume filter syntax: build options separately, ensure 'enable' is quoted
         volume_enable_value = 1 if i == initial_active_track_idx else 0
         volume_options_list = []
-        volume_options_list.append(f"enable='eq(1,{volume_enable_value})'") # Ensure enable expression is quoted
+        volume_options_list.append(f"enable='eq(1,{volume_enable_value})'")
         volume_options_list.append("eval=frame")
+        
+        # Corrected: Place instance name directly after filter name
+        volume_filter_str = f"volume@volume_a{i}={':'.join(volume_options_list)}"
 
-        # Corrected: Join azmq options with ':' instead of ','
         azmq_audio_options = []
         azmq_audio_options.append(f"bind_address=tcp\\\\\\://\\*\\\\\\:{audio_zmq_ports[i]}")
-        azmq_audio_options.append("control=1")
 
         audio_filter_parts.append(
             f'[{i}:a]aformat=channel_layouts=stereo,'
-            f"volume={':'.join(volume_options_list)}@volume_a{i}," # Join volume options with ':'
-            f"azmq={':'.join(azmq_audio_options)}@audio_control_{i}[a_out_{i}]" # Changed join from ',' to ':'
+            f"{volume_filter_str}," # Use the correctly constructed volume filter string
+            f"azmq={':'.join(azmq_audio_options)}@audio_control_{i}[a_out_{i}]"
         )
         audio_input_labels_for_amix.append(f'[a_out_{i}]')
 
@@ -248,7 +247,7 @@ def combine_streams():
                 try:
                     video_zmq_socket.send_string(cmd)
                     response = video_zmq_socket.recv_string()
-                    logger.info(f"[{stream_id}] Initial highlight command response for '{cmd}': {response}")
+                    logger.info(f"[{stream_id}] Video ZMQ response for '{cmd}': {response}")
                 except zmq.error.Again:
                     logger.warning(f"[{stream_id}] FFmpeg did not respond to command '{cmd}' within timeout. (zmq.error.Again)")
                     pass
