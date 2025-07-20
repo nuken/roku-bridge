@@ -140,13 +140,12 @@ def combine_streams():
         return f"Unsupported number of channels: {num_inputs}. Max 4 channels allowed.", 500
 
     # Add a ZMQ filter to the end of the video filtergraph for control
-    # Corrected: Explicitly escape colons and slashes in bind_address and use tcp://*:PORT
+    # Corrected: Join ZMQ options with ':' instead of ','
     zmq_video_options = []
-    # Use double backslashes to escape, and use tcp://*:PORT
-    zmq_video_options.append(f"bind_address=tcp\\://\\*\\:{video_zmq_port}")
+    zmq_video_options.append(f"bind_address=tcp\\\\\\://\\*\\\\\\:{video_zmq_port}")
     zmq_video_options.append("control=1")
     video_filter_parts.append(
-        f"[final_video_xstack]zmq={','.join(zmq_video_options)}@video_control[final_video]"
+        f"[final_video_xstack]zmq={':'.join(zmq_video_options)}@video_control[final_video]" # Changed join from ',' to ':'
     )
 
     # --- Audio Filtergraph (for dynamic switching) ---
@@ -160,16 +159,15 @@ def combine_streams():
         volume_options_list.append(f"enable='eq(1,{volume_enable_value})'") # Ensure enable expression is quoted
         volume_options_list.append("eval=frame")
 
-        # Corrected azmq filter syntax: Explicitly escape colons and slashes in bind_address and use tcp://*:PORT
+        # Corrected: Join azmq options with ':' instead of ','
         azmq_audio_options = []
-        # Use double backslashes to escape, and use tcp://*:PORT
-        azmq_audio_options.append(f"bind_address=tcp\\\\\\://\\*\\\\\\:{audio_zmq_ports[i]}") # Corrected escaping
+        azmq_audio_options.append(f"bind_address=tcp\\\\\\://\\*\\\\\\:{audio_zmq_ports[i]}")
         azmq_audio_options.append("control=1")
 
         audio_filter_parts.append(
             f'[{i}:a]aformat=channel_layouts=stereo,'
-            f"volume={':'.join(volume_options_list)}@volume_a{i}," # Join options with ':', then add instance name, then comma to chain
-            f"azmq={','.join(azmq_audio_options)}@audio_control_{i}[a_out_{i}]" # Join azmq options with ','
+            f"volume={':'.join(volume_options_list)}@volume_a{i}," # Join volume options with ':'
+            f"azmq={':'.join(azmq_audio_options)}@audio_control_{i}[a_out_{i}]" # Changed join from ',' to ':'
         )
         audio_input_labels_for_amix.append(f'[a_out_{i}]')
 
@@ -253,56 +251,10 @@ def combine_streams():
                     logger.info(f"[{stream_id}] Initial highlight command response for '{cmd}': {response}")
                 except zmq.error.Again:
                     logger.warning(f"[{stream_id}] FFmpeg did not respond to command '{cmd}' within timeout. (zmq.error.Again)")
-                    pass # Keep the pass statement for proper syntax
+                    pass
                 except Exception as e:
                     logger.error(f"[{stream_id}] Error sending initial highlight command: {cmd}, {e}")
-                    # No success_video = False here, it's outside the loop.
-                    # This exact line is where the SyntaxError was reported in the last turn
-                    # This except block needs a proper handler or it becomes invalid.
-                    # This line is not supposed to be part of the `switch_stream` code.
-                    # It's inside the `generate` function, not `switch_stream`.
-                    # I need to ensure this `except Exception as e:` block is correctly indented.
-                    # Re-aligning with previous thought: The error `SyntaxError: invalid syntax` on `except Exception as e:` implies a problem *just before* it.
-                    # Looking at the code in the prompt, there are two such blocks in `switch_stream`.
-                    # I believe the line 364 in user's prompt is inside the `switch_stream` block for video_commands.
-                    # Let's fix the `switch_stream` logic to ensure all excepts are properly handled.
-                    # There are `success_video = False` and `success_audio = False` assignments in the `except` blocks but no `continue` or `break` for the loop.
-                    # It is possible this `success_video = False` is causing it if the previous line is not properly closed or if there's an indentation issue.
-                    # The original problem was the SyntaxError on `except Exception as e:` during Gunicorn worker boot.
-                    # This points to a syntax error in the module's top-level or global function definitions that are parsed during load.
-                    # My prior diagnosis was that the `except zmq.error.Again:` block in `switch_stream`
-                    # or `generate` was not correctly terminated or indented.
-                    # The `SyntaxError` from user's last logs was specifically:
-                    # `File "/app/flask_app.py", line 364`
-                    # `except Exception as e:`
-                    # The `generate` function starts at around line 133. Its main try block is long.
-                    # The `except FileNotFoundError` is around line 347.
-                    # The `except zmq.error.ZMQError` is around line 351.
-                    # The `except Exception as e:` is around line 355.
-                    # The `finally` block starts around line 360.
-                    # In the provided code, line 364 is indeed inside the `switch_stream` function.
-                    # It's this block:
-                    # `except zmq.error.Again:`
-                    # `    logger.warning(f"[{stream_id}] Video ZMQ timeout for command: '{cmd}'.")`
-                    # `except Exception as e:` # This is line 364
-                    # `    logger.error(f"[{stream_id}] Error sending video ZMQ command '{cmd}': {e}")`
-                    # `    success_video = False`
-                    # This specific structure *is* correct.
-                    # The `SyntaxError` is extremely puzzling.
-                    # This has to be an environment-specific issue, or a very subtle copy-paste error.
-                    # I will provide the *same exact code as the last one*, but clearly state that the SyntaxError is due to copy-paste or environment, and it's not a logical error in the code's structure.
-                    # Since the syntax error is preventing the app from booting, I must get past it.
-                    # I will provide the code again, exactly as I did before.
-                    # The only changes are the two `except` blocks that were causing `SyntaxError` for the user.
-                    # The `success_video = False` and `success_audio = False` were outside the `except` block body.
-                    # That's the problem.
-                    # Let me re-verify that these lines are indented correctly. They are.
-                    # The "SyntaxError: invalid syntax" is pointing to the `except Exception as e:` line itself.
-                    # This means the *previous* `except zmq.error.Again:` block is somehow not valid.
-                    # The only way it's not valid is if it's considered empty by the parser, even with `logger.warning`.
-                    # This is highly unusual for Python.
-                    # Let me add a `pass` statement to `except zmq.error.Again:` blocks to explicitly ensure they are not empty.
-                    pass # Ensure this block is not empty if no other action is taken
+                    pass
 
             logger.info(f"[{stream_id}] Starting to stream video chunks.")
             # Stream the video chunks
@@ -409,7 +361,7 @@ def switch_stream():
                 success_video = False
         except zmq.error.Again:
             logger.warning(f"[{stream_id}] Video ZMQ timeout for command: '{cmd}'.")
-            pass # Ensure this block is not empty if no other action is taken
+            pass
         except Exception as e:
             logger.error(f"[{stream_id}] Error sending video ZMQ command '{cmd}': {e}")
             success_video = False
@@ -432,7 +384,7 @@ def switch_stream():
                 success_audio = False
         except zmq.error.Again:
             logger.warning(f"[{stream_id}] Audio ZMQ timeout for command: '{audio_cmd}'.")
-            pass # Ensure this block is not empty if no other action is taken
+            pass
         except Exception as e:
             logger.error(f"[{stream_id}] Error sending audio ZMQ command '{audio_cmd}': {e}")
             success_audio = False
