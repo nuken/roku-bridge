@@ -146,3 +146,38 @@ GPU passthrough should be handled automatically by Docker Desktop if your host d
    * **Stream Format:** MPEG-TS
    * **URL:** http://\<IP\_OF\_DOCKER\_HOST\>:5006/channels.m3u  
 4. Save the source. Channels will automatically import your channels and download the guide data.
+
+
+
+## Finding Your Roku's Information
+
+To configure the bridge, you need three key pieces of information from your Roku device: its IP address, the app ID for each streaming service, and the specific content ID for each live channel.
+
+### Step 1: Find Your Roku's IP Address
+
+1.  On your Roku remote, press the **Home** button.
+2.  Navigate to **Settings** \> **Network** \> **About**.
+3.  Note the **IP Address** (e.g., `192.168.1.100`).
+
+### Step 2: Enable Control by Mobile Apps
+
+This setting is required for the script to send commands to the Roku.
+
+1.  On your Roku remote, press the **Home** button.
+2.  Navigate to **Settings** \> **System** \> **Advanced system settings**.
+3.  Select **Control by mobile apps**.
+4.  Ensure the "Network access" setting is set to **Default** or **Permissive**.
+
+### Step 3: Find Roku App IDs
+
+Run the following command in a terminal or PowerShell window, replacing `YOUR_ROKU_IP` with the IP address you found in Step 1.
+
+```
+bash
+curl http://YOUR_ROKU_IP:8060/query/apps
+
+```
+
+This will return an XML list of all installed applications and their corresponding ID numbers. Find the apps you want to use (e.g., YouTube TV, Philo) and note their IDs.
+
+*Finding the `deep_link_content_id` for each specific live channel is more complex and varies by app. This typically requires a more advanced network analysis while the app is running.*
