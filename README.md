@@ -181,3 +181,45 @@ curl http://YOUR_ROKU_IP:8060/query/apps
 This will return an XML list of all installed applications and their corresponding ID numbers. Find the apps you want to use (e.g., YouTube TV, Philo) and note their IDs.
 
 *Finding the `deep_link_content_id` for each specific live channel is more complex and varies by app. This typically requires a more advanced network analysis while the app is running.*
+
+## Updating the Configuration on a Running Container
+
+If you need to add, remove, or change channels without rebuilding and restarting your Docker container, you can upload a modified `roku_channels.json` file directly to the running application.
+
+This is done using a `curl` command from a terminal or PowerShell window on a computer on the same network.
+
+#### **The Command**
+
+```bash
+curl -X POST -F "file=@roku_channels.json" http://<IP_OF_DOCKER_HOST>:<PORT>/upload_config
+```
+
+#### **Command Breakdown**
+
+  * `curl`: A command-line tool for transferring data with URLs.
+  * `-X POST`: Specifies that you are making a `POST` request, which is used to send data to a server.
+  * `-F "file=@roku_channels.json"`: This tells `curl` to send the data as a form.
+      * `file=`: This corresponds to the field name the server is expecting.
+      * `@roku_channels.json`: The `@` symbol is crucial. It tells `curl` to read the content of the file named `roku_channels.json` from your current directory and send that content as the data.
+  * `http://<IP_OF_DOCKER_HOST>:<PORT>/upload_config`: This is the destination URL.
+      * You must replace `<IP_OF_DOCKER_HOST>` with the IP address of the machine running your Docker container.
+      * Replace `<PORT>` with the port you mapped in your `docker run` command (e.g., `5006`).
+
+#### **How to Use It: Step-by-Step**
+
+1.  **Modify Your File:** Make any desired changes to your local `roku_channels.json` file and save it.
+2.  **Open a Terminal:** Open PowerShell, Command Prompt, or a terminal on your computer.
+3.  **Navigate to the Folder:** Use the `cd` command to navigate to the directory where your modified `roku_channels.json` file is located.
+    ```powershell
+    # Example
+    cd C:\Users\Bobby\Documents\N\roku-channels-bridge
+    ```
+4.  **Run the Command:** Execute the `curl` command, ensuring the IP address and port are correct for your setup.
+    ```bash
+    curl -X POST -F "file=@roku_channels.json" http://192.168.86.64:5006/upload_config
+    ```
+
+If the upload is successful, the server will respond with a JSON message like:
+`{"status":"success","message":"Configuration updated successfully"}`
+
+The application will immediately reload the new configuration and use it for all subsequent stream requests.
