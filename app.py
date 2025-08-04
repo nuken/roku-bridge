@@ -15,6 +15,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- Environment & Global Variables ---
 CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
+# NEW: Check for the debug logging environment variable
+DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
+
 
 # --- State Management for Tuner Pool ---
 TUNERS = []
@@ -26,17 +29,18 @@ ENCODER_SETTINGS = {}
 
 def get_encoder_options():
     """Detects available ffmpeg hardware acceleration."""
-    logging.info("Detecting available hardware acceleration encoders...")
+    if DEBUG_LOGGING_ENABLED:
+        logging.info("Detecting available hardware acceleration encoders...")
     try:
         result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, check=True)
         available_encoders = result.stdout
         if 'h264_nvenc' in available_encoders:
-            logging.info("NVIDIA NVENC detected.")
+            if DEBUG_LOGGING_ENABLED: logging.info("NVIDIA NVENC detected.")
             return {"codec": "h264_nvenc", "preset_args": ['-preset', 'p2'], "hwaccel_args": []}
         if 'h264_qsv' in available_encoders:
-            logging.info("Intel QSV detected.")
+            if DEBUG_LOGGING_ENABLED: logging.info("Intel QSV detected.")
             return {"codec": "h264_qsv", "preset_args": [], "hwaccel_args": ['-hwaccel', 'qsv', '-c:v', 'h264_qsv']}
-        logging.info("No hardware acceleration detected. Using software encoding.")
+        if DEBUG_LOGGING_ENABLED: logging.info("No hardware acceleration detected. Using software encoding.")
         return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
     except Exception as e:
         logging.error(f"ffmpeg detection failed: {e}. Defaulting to software encoding.")
@@ -46,7 +50,7 @@ def load_config():
     """Loads tuner and channel configuration."""
     global TUNERS, CHANNELS
     if not os.path.exists(CONFIG_FILE_PATH):
-        logging.warning(f"Config file not found: {CONFIG_FILE_PATH}")
+        if DEBUG_LOGGING_ENABLED: logging.warning(f"Config file not found: {CONFIG_FILE_PATH}")
         return
     try:
         with open(CONFIG_FILE_PATH, 'r') as f:
@@ -55,7 +59,7 @@ def load_config():
         for tuner in TUNERS:
             tuner['in_use'] = False
         CHANNELS = config_data.get('channels', [])
-        logging.info(f"Loaded {len(TUNERS)} tuners and {len(CHANNELS)} channels.")
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Loaded {len(TUNERS)} tuners and {len(CHANNELS)} channels.")
     except Exception as e:
         logging.error(f"Error loading config: {e}")
         TUNERS, CHANNELS = [], []
@@ -66,7 +70,7 @@ def lock_tuner():
         for tuner in TUNERS:
             if not tuner.get('in_use'):
                 tuner['in_use'] = True
-                logging.info(f"Locked tuner: {tuner.get('name', tuner.get('roku_ip'))}")
+                if DEBUG_LOGGING_ENABLED: logging.info(f"Locked tuner: {tuner.get('name', tuner.get('roku_ip'))}")
                 return tuner
     return None
 
@@ -76,7 +80,7 @@ def release_tuner(tuner_ip):
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
                 tuner['in_use'] = False
-                logging.info(f"Released tuner: {tuner.get('name', tuner.get('roku_ip'))}")
+                if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name', tuner.get('roku_ip'))}")
                 break
 
 def reencode_stream(encoder_url, roku_ip_to_release):
@@ -89,7 +93,7 @@ def reencode_stream(encoder_url, roku_ip_to_release):
             ['-b:v', '4000k', '-c:a', 'aac', '-b:a', '128k'] +
             ['-f', 'mpegts', '-loglevel', 'error', '-']
         )
-        logging.info(f"Starting ffmpeg for tuner {roku_ip_to_release}: {' '.join(command)}")
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting ffmpeg for tuner {roku_ip_to_release}: {' '.join(command)}")
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for chunk in iter(lambda: process.stdout.read(8192), b''):
             yield chunk
@@ -109,7 +113,6 @@ def generate_m3u():
         if all(k in channel for k in ["id", "name", "tvc_guide_stationid"]):
             stream_url = f"http://{request.host}/stream/{channel['id']}"
             
-            # Start building the EXTINF line
             extinf_parts = [
                 f'#EXTINF:-1 channel-id="{channel["id"]}"',
                 f'tvg-id="{channel["id"]}"',
@@ -117,11 +120,9 @@ def generate_m3u():
                 f'tvc-guide-stationid="{channel["tvc_guide_stationid"]}"'
             ]
             
-            # --- NEW: Add optional guide shift ---
             if "guide_shift" in channel:
                 extinf_parts.append(f'tvc-guide-shift="{channel["guide_shift"]}"')
             
-            # Join the parts and add the channel name at the end
             extinf = ' '.join(extinf_parts) + f',{channel["name"]}'
             
             m3u_content.append(extinf)
@@ -133,7 +134,7 @@ def stream_channel(channel_id):
     """Locks a tuner, tunes the Roku with optional delay, and starts the stream."""
     locked_tuner = lock_tuner()
     if not locked_tuner:
-        logging.warning("Stream request failed: All tuners are in use.")
+        if DEBUG_LOGGING_ENABLED: logging.warning("Stream request failed: All tuners are in use.")
         return "All tuners are currently in use.", 503
 
     channel_data = next((c for c in CHANNELS if c["id"] == channel_id), None)
@@ -142,23 +143,20 @@ def stream_channel(channel_id):
         return "Channel not found.", 404
 
     try:
-        # --- ECP Tuning ---
         roku_app_id = channel_data["roku_app_id"]
         content_id = channel_data["deep_link_content_id"]
         media_type = channel_data["media_type"]
         roku_tune_url = f"http://{locked_tuner['roku_ip']}:8060/launch/{roku_app_id}?contentId={content_id}&mediaType={media_type}"
         requests.post(roku_tune_url, timeout=10).raise_for_status()
 
-        # --- Conditional Keypress ---
         if channel_data.get("needs_select_keypress", False):
             time.sleep(1)
             keypress_url = f"http://{locked_tuner['roku_ip']}:8060/keypress/Select"
             requests.post(keypress_url, timeout=5).raise_for_status()
-            logging.info(f"Sent 'Select' keypress to {locked_tuner['roku_ip']}")
+            if DEBUG_LOGGING_ENABLED: logging.info(f"Sent 'Select' keypress to {locked_tuner['roku_ip']}")
 
-        # --- Per-Channel Tuning Delay ---
         delay_seconds = channel_data.get("tune_delay", 3)
-        logging.info(f"Waiting for {delay_seconds} seconds (tune_delay) before starting stream...")
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Waiting for {delay_seconds} seconds (tune_delay) before starting stream...")
         time.sleep(delay_seconds)
 
     except requests.exceptions.RequestException as e:
