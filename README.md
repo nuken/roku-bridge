@@ -180,7 +180,7 @@ curl http://YOUR_ROKU_IP:8060/query/apps
 
 This will return an XML list of all installed applications and their corresponding ID numbers. Find the apps you want to use (e.g., YouTube TV, Philo) and note their IDs.
 
-*Finding the `deep_link_content_id` for each specific live channel is more complex and varies by app. This typically requires a more advanced network analysis while the app is running.*
+*Finding the `deep_link_content_id` for each specific live channel is more complex and varies by app. This typically requires a more advanced network analysis while the app is running or locating it from the streaming services website player.*
 
 ## Updating the Configuration on a Running Container
 
