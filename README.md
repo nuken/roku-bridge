@@ -267,16 +267,16 @@ If a channel's guide data doesn't match your local time zone (e.g., you are watc
 ```
 ### Required "Select" Keypress
 
-Certain apps require a "Select" command to be sent after the initial deep link to start the video stream. By adding "needs_select_keypress": true, you can tell the script to perform this extra step.If this key is omitted, no extra keypress will be sent.
+Certain apps may require a "Select" command to be sent after the initial deep link to start the video stream. By adding "needs_select_keypress": true, you can tell the script to perform this extra step.If this key is omitted, no extra keypress will be sent.
 
 **Example:**
 ```json
 {
-  "id": "yt_cbs_east",
+  "id": "sa_cbs_east",
   "name": "CBS (East)",
   "tvc_guide_stationid": "12345",
   "roku_app_id": "20197",
-  "deep_link_content_id": "some_youtube_tv_id",
+  "deep_link_content_id": "some_app_id",
   "media_type": "live",
   "needs_select_keypress": true
 }
