@@ -1,4 +1,4 @@
-# **Roku Channels Bridge \- Version 0.02.0**
+# **Roku Channels Bridge \- Version 0.03.0**
 
 This project provides a Dockerized bridge server that allows you to use one or more Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and using this script to manage channel changes and proxy the video stream.
 
@@ -223,3 +223,61 @@ If the upload is successful, the server will respond with a JSON message like:
 `{"status":"success","message":"Configuration updated successfully"}`
 
 The application will immediately reload the new configuration and use it for all subsequent stream requests.
+
+
+## Optional Channel Settings
+
+You can add the following optional keys to any channel in the `channels` list of your `roku_channels.json` file to fine-tune its behavior.
+
+---
+
+### Custom Tuning Delay
+
+Some Roku apps, like YouTube TV, have a splash screen that displays before the video stream begins. The `tune_delay` key allows you to set a custom wait time (in seconds) for a specific channel, ensuring the script doesn't start capturing the stream too early.
+
+If this key is omitted, a default delay of 3 seconds will be used.
+
+**Example:**
+```json
+{
+  "id": "yt_cbs_east",
+  "name": "CBS (East)",
+  "tvc_guide_stationid": "12345",
+  "roku_app_id": "20197",
+  "deep_link_content_id": "some_youtube_tv_id",
+  "media_type": "live",
+  "tune_delay": 4
+}
+```
+### Guide Data Time Zone Shift
+
+If a channel's guide data doesn't match your local time zone (e.g., you are watching a West Coast feed in an East Coast time zone), you can use the guide_shift key to apply an offset. The value is in seconds.To shift the guide back 1 hour, use -3600.To shift the guide forward 1 hour, use 3600.If this key is omitted, no time shift will be applied.
+
+**Example:**
+```json
+{
+  "id": "philo_cc_west",
+  "name": "Comedy Central (West)",
+  "tvc_guide_stationid": "67890",
+  "roku_app_id": "196460",
+  "deep_link_content_id": "some_philo_id",
+  "media_type": "live",
+  "guide_shift": -10800
+}
+```
+### Required "Select" Keypress
+
+Certain apps require a "Select" command to be sent after the initial deep link to start the video stream. By adding "needs_select_keypress": true, you can tell the script to perform this extra step.If this key is omitted, no extra keypress will be sent.
+
+**Example:**
+```json
+{
+  "id": "yt_cbs_east",
+  "name": "CBS (East)",
+  "tvc_guide_stationid": "12345",
+  "roku_app_id": "20197",
+  "deep_link_content_id": "some_youtube_tv_id",
+  "media_type": "live",
+  "needs_select_keypress": true
+}
+```
