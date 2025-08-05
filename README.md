@@ -1,8 +1,8 @@
-# **Roku Channels Bridge \- Version 0.03.2**
+# **Roku Channels Bridge \- Version 0.03.3**
 
 This project provides a Dockerized bridge server that allows you to use one or more Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and using this script to manage channel changes and proxy the video stream.
 
-This version now **auto-detects available GPU hardware** (Intel QSV or NVIDIA NVENC) to handle the demanding video re-encoding process. This significantly reduces CPU usage. If no compatible GPU is found, it falls back to a CPU-efficient software encode.
+This versions `ENCODING_MODE` environment variable now defaults to `proxy` mode and allows for switching to `ffmpeg` re-encoding mode by adding `-e ENCODING_MODE=reencode` flag to the run command. If your Channels DVR logs show `Packet corrupt` errors and the stream keeps stopping, you will need to use the `-e ENCODING_MODE=reencode` flag for testing.
 
 ## **How It Works**
 
@@ -289,3 +289,7 @@ Certain apps may require a "Select" command to be sent after the initial deep li
 2.  By default, this is off, and the logs will remain clean, only showing critical errors.
 
 3.  If a user starts the container with `-e ENABLE_DEBUG_LOGGING=true`, all the detailed operational logs (tuner locking, ffmpeg commands, etc.) will be printed, which is perfect for debugging.
+
+## Enable Re-encoding
+
+If you have stream breaking, add the `-e ENCODING_MODE=reencode` flag to the run command.
