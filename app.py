@@ -5,6 +5,7 @@ import os
 import requests
 import time
 import threading
+import httpx
 from flask import Flask, request, jsonify, Response, stream_with_context
 
 app = Flask(__name__)
@@ -15,9 +16,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- Environment & Global Variables ---
 CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
-# NEW: Check for the debug logging environment variable
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
-
+# NEW: Selectable encoding mode. Defaults to 'proxy' for low CPU usage.
+ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 
 # --- State Management for Tuner Pool ---
 TUNERS = []
@@ -28,9 +29,8 @@ ENCODER_SETTINGS = {}
 # --- Core Application Logic ---
 
 def get_encoder_options():
-    """Detects available ffmpeg hardware acceleration."""
-    if DEBUG_LOGGING_ENABLED:
-        logging.info("Detecting available hardware acceleration encoders...")
+    # ... (This function is unchanged)
+    if DEBUG_LOGGING_ENABLED: logging.info("Detecting available hardware acceleration encoders...")
     try:
         result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, check=True)
         available_encoders = result.stdout
@@ -47,7 +47,7 @@ def get_encoder_options():
         return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
 
 def load_config():
-    """Loads tuner and channel configuration."""
+    # ... (This function is unchanged)
     global TUNERS, CHANNELS
     if not os.path.exists(CONFIG_FILE_PATH):
         if DEBUG_LOGGING_ENABLED: logging.warning(f"Config file not found: {CONFIG_FILE_PATH}")
@@ -65,7 +65,7 @@ def load_config():
         TUNERS, CHANNELS = [], []
 
 def lock_tuner():
-    """Finds and locks an available tuner."""
+    # ... (This function is unchanged)
     with TUNER_LOCK:
         for tuner in TUNERS:
             if not tuner.get('in_use'):
@@ -75,7 +75,7 @@ def lock_tuner():
     return None
 
 def release_tuner(tuner_ip):
-    """Releases a locked tuner."""
+    # ... (This function is unchanged)
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
@@ -83,8 +83,10 @@ def release_tuner(tuner_ip):
                 if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name', tuner.get('roku_ip'))}")
                 break
 
-def reencode_stream(encoder_url, roku_ip_to_release):
-    """Generator function to re-encode the stream and release the tuner."""
+# --- Streaming Functions ---
+
+def reencode_stream_generator(encoder_url, roku_ip_to_release):
+    """Generator for the high-stability ffmpeg re-encoding method."""
     try:
         command = (
             ['ffmpeg'] + ENCODER_SETTINGS['hwaccel_args'] +
@@ -93,7 +95,7 @@ def reencode_stream(encoder_url, roku_ip_to_release):
             ['-b:v', '4000k', '-c:a', 'aac', '-b:a', '128k'] +
             ['-f', 'mpegts', '-loglevel', 'error', '-']
         )
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting ffmpeg for tuner {roku_ip_to_release}: {' '.join(command)}")
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting FFMPEG RE-ENCODE for tuner {roku_ip_to_release}")
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for chunk in iter(lambda: process.stdout.read(8192), b''):
             yield chunk
@@ -103,35 +105,58 @@ def reencode_stream(encoder_url, roku_ip_to_release):
     finally:
         release_tuner(roku_ip_to_release)
 
+def proxy_stream_generator(encoder_url, roku_ip_to_release):
+    """Generator for the low-CPU, resilient HTTPX proxy method."""
+    try:
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting HTTPX PROXY for tuner {roku_ip_to_release}")
+        transport = httpx.HTTPTransport(retries=5)
+        timeout = httpx.Timeout(15.0)
+        headers = {"accept": "*/*", "range": "bytes=0-"}
+
+        with httpx.Client(timeout=timeout, transport=transport, headers=headers, follow_redirects=True) as client:
+            # Allow for retries as some devices drop connections when they start streaming
+            for _ in range(10):
+                try:
+                    with client.stream("GET", encoder_url) as r:
+                        r.raise_for_status()
+                        for data in r.iter_bytes():
+                            yield data
+                except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                    if DEBUG_LOGGING_ENABLED: logging.warning(f"Stream for {roku_ip_to_release} broke, retrying... Error: {e}")
+                    time.sleep(1) # Wait a second before retrying
+                else:
+                    break # If stream finishes without error, break the retry loop
+    except Exception as e:
+        logging.error(f"Error in proxy_stream_generator for {roku_ip_to_release}: {e}")
+    finally:
+        release_tuner(roku_ip_to_release)
+
+
 # --- Flask Routes ---
 
 @app.route('/channels.m3u')
 def generate_m3u():
-    """Generates the M3U playlist, including optional guide shift."""
+    # ... (This function is unchanged)
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
     for channel in CHANNELS:
         if all(k in channel for k in ["id", "name", "tvc_guide_stationid"]):
             stream_url = f"http://{request.host}/stream/{channel['id']}"
-            
             extinf_parts = [
                 f'#EXTINF:-1 channel-id="{channel["id"]}"',
                 f'tvg-id="{channel["id"]}"',
                 f'tvg-name="{channel["name"]}"',
                 f'tvc-guide-stationid="{channel["tvc_guide_stationid"]}"'
             ]
-            
             if "guide_shift" in channel:
                 extinf_parts.append(f'tvc-guide-shift="{channel["guide_shift"]}"')
-            
             extinf = ' '.join(extinf_parts) + f',{channel["name"]}'
-            
             m3u_content.append(extinf)
             m3u_content.append(stream_url)
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
-    """Locks a tuner, tunes the Roku with optional delay, and starts the stream."""
+    # ... (Tuning logic is unchanged)
     locked_tuner = lock_tuner()
     if not locked_tuner:
         if DEBUG_LOGGING_ENABLED: logging.warning("Stream request failed: All tuners are in use.")
@@ -156,7 +181,7 @@ def stream_channel(channel_id):
             if DEBUG_LOGGING_ENABLED: logging.info(f"Sent 'Select' keypress to {locked_tuner['roku_ip']}")
 
         delay_seconds = channel_data.get("tune_delay", 3)
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Waiting for {delay_seconds} seconds (tune_delay) before starting stream...")
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Waiting for {delay_seconds} seconds (tune_delay)...")
         time.sleep(delay_seconds)
 
     except requests.exceptions.RequestException as e:
@@ -164,9 +189,15 @@ def stream_channel(channel_id):
         release_tuner(locked_tuner['roku_ip'])
         return f"Failed to tune Roku: {e}", 500
 
-    stream_generator = reencode_stream(locked_tuner['encoder_url'], locked_tuner['roku_ip'])
+    # --- UPDATED: Select streaming method, defaulting to proxy ---
+    if ENCODING_MODE == 'reencode':
+        stream_generator = reencode_stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'])
+    else: # Default to proxy
+        stream_generator = proxy_stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'])
+    
     return Response(stream_with_context(stream_generator), mimetype='video/mpeg')
 
+# ... (other routes are unchanged) ...
 @app.route('/upload_config', methods=['POST'])
 def upload_config():
     if 'file' not in request.files: return "No file part", 400
@@ -183,7 +214,8 @@ def upload_config():
 
 @app.route('/')
 def index():
-    return f"Roku Channels Bridge is running with {len(TUNERS)} tuners available."
+    return f"Roku Channels Bridge is running with {len(TUNERS)} tuners available in '{ENCODING_MODE}' mode."
+
 
 # --- App Initialization ---
 if __name__ != '__main__':
