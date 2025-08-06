@@ -43,13 +43,13 @@ This is a list of your physical hardware setups (Roku \+ HDMI Encoder).
 
 "tuners": [  
   {  
-    "name": "Living Room Roku",  
+    "name": "Roku 1",  
     "roku_ip": "192.168.1.10",  
     "encoder_url": "http://192.168.1.20/ts/1_0",  
     "priority": 1  
   },  
   {  
-    "name": "Bedroom Roku",  
+    "name": "Roku 2",  
     "roku_ip": "192.168.1.11",  
     "encoder_url": "rtsp://192.168.1.21:554/stream",  
     "priority": 2  
