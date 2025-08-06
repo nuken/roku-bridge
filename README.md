@@ -2,7 +2,9 @@
 
 This project provides a Dockerized bridge server that allows you to use one or more Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and using this script to manage channel changes and proxy the video stream.
 
-0.03.3 `ENCODING_MODE` environment variable now defaults to `proxy` mode and allows for switching to `ffmpeg` re-encoding mode by adding `-e ENCODING_MODE=reencode` flag to the run command. If your Channels DVR logs show `Packet corrupt` errors and the stream keeps stopping, you will need to use the `-e ENCODING_MODE=reencode` flag for testing.
+0.03.2 Added an environment variable to turn `ENABLE_DEBUG_LOGGING` on for testing. Added optional settings for channels. Code improvements.
+
+0.03.3 `ENCODING_MODE` environment variable now defaults to `proxy` mode and allows for switching to `ffmpeg` re-encoding mode by adding `-e ENCODING_MODE=reencode` flag to the run command. If your Channels DVR logs show `Packet corrupt` errors and the stream keeps stopping, you will need to use the `-e ENCODING_MODE=reencode` flag for testing. Improved proxy function.
 
 0.03.4 Send a Home command to the Roku after tuner release.
 
