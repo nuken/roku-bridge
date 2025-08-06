@@ -17,7 +17,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
-# NEW: Selectable encoding mode. Defaults to 'proxy' for low CPU usage.
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 
 # --- State Management for Tuner Pool ---
@@ -29,7 +28,7 @@ ENCODER_SETTINGS = {}
 # --- Core Application Logic ---
 
 def get_encoder_options():
-    # ... (This function is unchanged)
+    """Detects available ffmpeg hardware acceleration."""
     if DEBUG_LOGGING_ENABLED: logging.info("Detecting available hardware acceleration encoders...")
     try:
         result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, check=True)
@@ -47,7 +46,7 @@ def get_encoder_options():
         return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
 
 def load_config():
-    # ... (This function is unchanged)
+    """Loads tuner and channel configuration."""
     global TUNERS, CHANNELS
     if not os.path.exists(CONFIG_FILE_PATH):
         if DEBUG_LOGGING_ENABLED: logging.warning(f"Config file not found: {CONFIG_FILE_PATH}")
@@ -65,7 +64,7 @@ def load_config():
         TUNERS, CHANNELS = [], []
 
 def lock_tuner():
-    # ... (This function is unchanged)
+    """Finds and locks an available tuner."""
     with TUNER_LOCK:
         for tuner in TUNERS:
             if not tuner.get('in_use'):
@@ -75,12 +74,23 @@ def lock_tuner():
     return None
 
 def release_tuner(tuner_ip):
-    # ... (This function is unchanged)
+    """Releases a locked tuner and sends a 'Home' command to the Roku."""
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
                 tuner['in_use'] = False
                 if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name', tuner.get('roku_ip'))}")
+                
+                # --- NEW: Send 'Home' command to stop streaming on the Roku device ---
+                try:
+                    home_url = f"http://{tuner_ip}:8060/keypress/Home"
+                    requests.post(home_url, timeout=5)
+                    if DEBUG_LOGGING_ENABLED:
+                        logging.info(f"Sent 'Home' command to Roku at {tuner_ip}")
+                except requests.exceptions.RequestException as e:
+                    # Log a warning but don't crash, as releasing the tuner is more important
+                    if DEBUG_LOGGING_ENABLED:
+                        logging.warning(f"Failed to send 'Home' command to Roku at {tuner_ip}: {e}")
                 break
 
 # --- Streaming Functions ---
@@ -114,7 +124,6 @@ def proxy_stream_generator(encoder_url, roku_ip_to_release):
         headers = {"accept": "*/*", "range": "bytes=0-"}
 
         with httpx.Client(timeout=timeout, transport=transport, headers=headers, follow_redirects=True) as client:
-            # Allow for retries as some devices drop connections when they start streaming
             for _ in range(10):
                 try:
                     with client.stream("GET", encoder_url) as r:
@@ -123,9 +132,9 @@ def proxy_stream_generator(encoder_url, roku_ip_to_release):
                             yield data
                 except (httpx.RequestError, httpx.HTTPStatusError) as e:
                     if DEBUG_LOGGING_ENABLED: logging.warning(f"Stream for {roku_ip_to_release} broke, retrying... Error: {e}")
-                    time.sleep(1) # Wait a second before retrying
+                    time.sleep(1)
                 else:
-                    break # If stream finishes without error, break the retry loop
+                    break
     except Exception as e:
         logging.error(f"Error in proxy_stream_generator for {roku_ip_to_release}: {e}")
     finally:
@@ -136,7 +145,6 @@ def proxy_stream_generator(encoder_url, roku_ip_to_release):
 
 @app.route('/channels.m3u')
 def generate_m3u():
-    # ... (This function is unchanged)
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
     for channel in CHANNELS:
         if all(k in channel for k in ["id", "name", "tvc_guide_stationid"]):
@@ -156,7 +164,6 @@ def generate_m3u():
 
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
-    # ... (Tuning logic is unchanged)
     locked_tuner = lock_tuner()
     if not locked_tuner:
         if DEBUG_LOGGING_ENABLED: logging.warning("Stream request failed: All tuners are in use.")
@@ -189,7 +196,6 @@ def stream_channel(channel_id):
         release_tuner(locked_tuner['roku_ip'])
         return f"Failed to tune Roku: {e}", 500
 
-    # --- UPDATED: Select streaming method, defaulting to proxy ---
     if ENCODING_MODE == 'reencode':
         stream_generator = reencode_stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'])
     else: # Default to proxy
@@ -197,7 +203,6 @@ def stream_channel(channel_id):
     
     return Response(stream_with_context(stream_generator), mimetype='video/mpeg')
 
-# ... (other routes are unchanged) ...
 @app.route('/upload_config', methods=['POST'])
 def upload_config():
     if 'file' not in request.files: return "No file part", 400
@@ -215,7 +220,6 @@ def upload_config():
 @app.route('/')
 def index():
     return f"Roku Channels Bridge is running with {len(TUNERS)} tuners available in '{ENCODING_MODE}' mode."
-
 
 # --- App Initialization ---
 if __name__ != '__main__':
