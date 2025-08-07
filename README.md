@@ -324,7 +324,3 @@ Certain apps may require a "Select" command to be sent after the initial deep li
 2.  By default, this is off, and the logs will remain clean, only showing critical errors.
 
 3.  If a user starts the container with `-e ENABLE_DEBUG_LOGGING=true`, all the detailed operational logs (tuner locking, ffmpeg commands, etc.) will be printed, which is perfect for debugging.
-
-## Enable Re-encoding
-
-If you have stream breaking, add the `-e ENCODING_MODE=reencode` flag to the run command.
