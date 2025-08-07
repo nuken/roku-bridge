@@ -81,14 +81,12 @@ def release_tuner(tuner_ip):
                 tuner['in_use'] = False
                 if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name', tuner.get('roku_ip'))}")
                 
-                # --- NEW: Send 'Home' command to stop streaming on the Roku device ---
                 try:
                     home_url = f"http://{tuner_ip}:8060/keypress/Home"
                     requests.post(home_url, timeout=5)
                     if DEBUG_LOGGING_ENABLED:
                         logging.info(f"Sent 'Home' command to Roku at {tuner_ip}")
                 except requests.exceptions.RequestException as e:
-                    # Log a warning but don't crash, as releasing the tuner is more important
                     if DEBUG_LOGGING_ENABLED:
                         logging.warning(f"Failed to send 'Home' command to Roku at {tuner_ip}: {e}")
                 break
@@ -96,16 +94,56 @@ def release_tuner(tuner_ip):
 # --- Streaming Functions ---
 
 def reencode_stream_generator(encoder_url, roku_ip_to_release):
-    """Generator for the high-stability ffmpeg re-encoding method."""
+    """Generator for a more optimized ffmpeg method.
+    It copies the video stream and re-encodes only the audio.
+    This is much less CPU-intensive than a full re-encode."""
     try:
-        command = (
-            ['ffmpeg'] + ENCODER_SETTINGS['hwaccel_args'] +
-            ['-i', encoder_url] +
-            ['-c:v', ENCODER_SETTINGS['codec']] + ENCODER_SETTINGS['preset_args'] +
-            ['-b:v', '4000k', '-c:a', 'aac', '-b:a', '128k'] +
-            ['-f', 'mpegts', '-loglevel', 'error', '-']
-        )
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting FFMPEG RE-ENCODE for tuner {roku_ip_to_release}")
+        command = [
+            'ffmpeg',
+            '-err_detect', 'ignore_err', # Ignore non-fatal errors in the input
+            '-fflags', '+genpts',      # Generate new presentation timestamps
+            '-i', encoder_url,
+            '-c:v', 'copy',            # Copy the video stream without re-encoding
+            '-c:a', 'aac',             # Re-encode the audio to AAC
+            '-b:a', '128k',            # Set audio bitrate
+            '-f', 'mpegts',
+            '-loglevel', 'error',
+            '-'
+        ]
+        if DEBUG_LOGGING_ENABLED:
+            logging.info(f"Starting FFMPEG RE-ENCODE (Audio Only) for tuner {roku_ip_to_release}")
+            logging.info(f"FFMPEG command: {' '.join(command)}")
+
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        for chunk in iter(lambda: process.stdout.read(8192), b''):
+            yield chunk
+
+        process.wait()
+        if process.returncode != 0:
+            stderr_output = process.stderr.read().decode()
+            logging.error(f"ffmpeg for {roku_ip_to_release} exited with error: {stderr_output}")
+
+    finally:
+        release_tuner(roku_ip_to_release)
+
+def remux_stream_generator(encoder_url, roku_ip_to_release):
+    """Generator for the low-CPU ffmpeg remuxing method."""
+    try:
+        command = [
+            'ffmpeg',
+            '-analyzeduration', '10M',
+            '-probesize', '10M',
+            '-err_detect', 'ignore_err',
+            '-fflags', '+genpts',
+            '-i', encoder_url,
+            '-c', 'copy',
+            '-map', '0',
+            '-f', 'mpegts',
+            '-loglevel', 'error',
+            '-'
+        ]
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting FFMPEG REMUX for tuner {roku_ip_to_release}")
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for chunk in iter(lambda: process.stdout.read(8192), b''):
             yield chunk
@@ -198,6 +236,8 @@ def stream_channel(channel_id):
 
     if ENCODING_MODE == 'reencode':
         stream_generator = reencode_stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'])
+    elif ENCODING_MODE == 'remux':
+        stream_generator = remux_stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'])
     else: # Default to proxy
         stream_generator = proxy_stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'])
     
