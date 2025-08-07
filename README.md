@@ -228,6 +228,35 @@ If the upload is successful, the server will respond with a JSON message like:
 
 The application will immediately reload the new configuration and use it for all subsequent stream requests.
 
+---
+
+## **Stream Handling Modes (ENCODING\_MODE)**
+
+The bridge can handle the video stream from your encoder in three different ways, controlled by the ENCODING\_MODE environment variable. Choosing the right mode can help you balance performance and stability based on your specific hardware.
+
+To set a mode, add the \-e ENCODING\_MODE=\<mode\> flag to your docker run command.
+
+### **1\. Proxy Mode (Default)**
+
+* **Command Flag:** (Not needed, this is the default)  
+* **CPU Usage:** Very Low  
+* **Description:** This mode directly proxies the stream from your HDMI encoder to Channels DVR without any modification. It's the most efficient option and works well if your encoder provides a clean, stable stream.
+
+### **2\. Remux Mode**
+
+* **Command Flag:** \-e ENCODING\_MODE=remux  
+* **CPU Usage:** Very Low  
+* **Description:** This mode uses ffmpeg to copy the original audio and video into a new, clean transport stream (.ts) container. It does **not** re-encode the streams, so CPU usage remains low.  
+* **Best Use Case:** Fixing issues with stream timing (PTS/DTS errors) or container-level corruption without the overhead of re-encoding. It will **not** fix issues with corrupted audio or video data from the source.
+
+### **3\. Re-encode Mode (Audio Only)**
+
+* **Command Flag:** \-e ENCODING\_MODE=reencode  
+* **CPU Usage:** Low  
+* **Description:** This is the recommended solution for fixing most stream-related problems. This mode uses ffmpeg to copy the video stream as-is (no re-encoding) while re-encoding only the audio stream.  
+* **Best Use Case:** Fixing corrupted audio from the encoder (e.g., "AAC packet too short" errors), which is a common issue. Since video processing is the most CPU-intensive task, this targeted approach provides a stable stream with minimal performance impact.
+
+---
 
 ## Optional Channel Settings
 
