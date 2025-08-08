@@ -1,14 +1,12 @@
-# Use an official Python runtime as a parent image
-FROM python:3.9-slim-buster
+# Use a more modern and supported Python runtime as a parent image
+FROM python:3.9-slim-bullseye
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Update apt sources and install dependencies
-RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list \
-    && sed -i 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' /etc/apt/sources.list \
-    && echo "deb http://archive.debian.org/debian/ buster main contrib non-free" >> /etc/apt/sources.list \
-    && apt-get update \
+# Add the "non-free" repository and install dependencies
+# The non-free repo is needed for the Intel driver
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        curl \
        ffmpeg \
