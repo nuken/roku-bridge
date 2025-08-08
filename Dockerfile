@@ -4,9 +4,9 @@ FROM python:3.9-slim-bullseye
 # Set the working directory in the container
 WORKDIR /app
 
-# Modify sources.list to include contrib and non-free, then install dependencies
-# The non-free repo is needed for the Intel driver
-RUN sed -i 's/main/main contrib non-free/g' /etc/apt/sources.list \
+# Add the "non-free" component to a new sources list file, then install dependencies
+# This is a more robust method than modifying the existing sources.list
+RUN echo "deb http://deb.debian.org/debian bullseye main contrib non-free" > /etc/apt/sources.list.d/non-free.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
        curl \
