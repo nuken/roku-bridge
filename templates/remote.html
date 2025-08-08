@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roku Remote</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #2c2c2c;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .remote-container {
+            background-color: #3a3a3a;
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+            width: 100%;
+            max-width: 320px;
+            box-sizing: border-box;
+        }
+        h1 {
+            text-align: center;
+            color: #7dd3fc;
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+        .device-selector {
+            margin-bottom: 25px;
+        }
+        .device-selector select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #555;
+            background-color: #4a4a4a;
+            color: #e0e0e0;
+            font-size: 1em;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url('data:image/svg+xml;utf8,<svg fill="%23e0e0e0" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+        }
+        .grid-container {
+            display: grid;
+            gap: 15px;
+        }
+        .button-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            justify-items: center;
+        }
+        .d-pad {
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 15px;
+            display: grid;
+        }
+        .remote-button {
+            background-color: #555;
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            width: 65px;
+            height: 65px;
+            font-size: 1.5em;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .remote-button:active {
+            background-color: #777;
+            transform: scale(0.95);
+        }
+        .d-pad .remote-button {
+            border-radius: 15px;
+        }
+        #button-up { grid-area: 1 / 2 / 2 / 3; }
+        #button-left { grid-area: 2 / 1 / 3 / 2; }
+        #button-ok { grid-area: 2 / 2 / 3 / 3; background-color: #7dd3fc; color: #2c2c2c; font-weight: bold; font-size: 1.2em; }
+        #button-right { grid-area: 2 / 3 / 3 / 4; }
+        #button-down { grid-area: 3 / 2 / 4 / 3; }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .notification.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="remote-container">
+        <h1><i class="fa-solid fa-satellite-dish"></i> Roku Remote</h1>
+        <div class="device-selector">
+            <select id="device-select" onchange="selectDevice()">
+                <option value="">Select a Roku Device</option>
+            </select>
+        </div>
+        <div class="grid-container">
+            <div class="button-row">
+                <button class="remote-button" id="button-back" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                <button class="remote-button" id="button-home" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
+                <button class="remote-button" id="button-cc" onclick="sendKey('ClosedCaption')"><i class="fa-solid fa-closed-captioning"></i></button>
+            </div>
+            <div class="d-pad">
+                <button class="remote-button" id="button-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                <button class="remote-button" id="button-left" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                <button class="remote-button" id="button-ok" onclick="sendKey('Select')">OK</button>
+                <button class="remote-button" id="button-right" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                <button class="remote-button" id="button-down" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+            </div>
+            <div class="button-row">
+                <button class="remote-button" id="button-rewind" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
+                <button class="remote-button" id="button-play-pause" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                <button class="remote-button" id="button-fast-forward" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
+            </div>
+        </div>
+    </div>
+    <div id="notification-area"></div>
+
+    <script>
+        const deviceSelect = document.getElementById('device-select');
+        let selectedDeviceIp = '';
+
+        function showNotification(message) {
+            const notificationArea = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.textContent = message;
+            notificationArea.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 10);
+
+            setTimeout(() => {
+                notification.classList.remove('show');
+                notification.addEventListener('transitionend', () => notification.remove());
+            }, 2000);
+        }
+
+        async function loadDevices() {
+            try {
+                const response = await fetch('/remote/devices');
+                const devices = await response.json();
+                deviceSelect.innerHTML = '<option value="">Select a Roku Device</option>';
+                devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.roku_ip;
+                    option.textContent = device.name;
+                    deviceSelect.appendChild(option);
+                });
+                const lastSelected = localStorage.getItem('lastSelectedRokuRemoteIp');
+                if(lastSelected && deviceSelect.querySelector(`option[value="${lastSelected}"]`)) {
+                    deviceSelect.value = lastSelected;
+                    selectDevice();
+                }
+            } catch (error) {
+                console.error('Failed to load devices:', error);
+                showNotification('Error loading devices.');
+            }
+        }
+
+        function selectDevice() {
+            selectedDeviceIp = deviceSelect.value;
+            if (selectedDeviceIp) {
+                localStorage.setItem('lastSelectedRokuRemoteIp', selectedDeviceIp);
+                showNotification(`Controlling: ${deviceSelect.options[deviceSelect.selectedIndex].text}`);
+            } else {
+                 localStorage.removeItem('lastSelectedRokuRemoteIp');
+            }
+        }
+
+        async function sendKey(key) {
+            if (!selectedDeviceIp) {
+                showNotification('Please select a device first.');
+                return;
+            }
+            try {
+                const response = await fetch(`/remote/keypress/${selectedDeviceIp}/${key}`, { method: 'POST' });
+                const result = await response.json();
+                if (result.status !== 'success') {
+                    showNotification(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                console.error(`Failed to send key ${key}:`, error);
+                showNotification('Failed to send command.');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadDevices);
+    </script>
+</body>
+</html>
