@@ -13,6 +13,12 @@ This setup allows you to use streaming service channels (like those from YouTube
 * **Hardware Acceleration:** Automatically detects and uses NVIDIA (NVENC) or Intel (QSV) GPUs for video processing if available.  
 * **Persistent Configuration:** Uses a Docker volume to safely store your configuration, so it persists through container updates and restarts.
 
+## **Download**
+
+1. On the main page of the GitHub repository, click the green **\< \> Code** button.  
+2. In the dropdown menu, click **Download ZIP**.  
+3. Extract the ZIP file to a folder on the computer where you run Docker.
+
 ## **Setup and Installation**
 
 This new version simplifies setup significantly. You no longer need to manage a local roku\_channels.json file on your computer. The configuration is stored in a persistent Docker volume and managed entirely through the web interface.
