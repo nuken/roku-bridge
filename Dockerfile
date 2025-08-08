@@ -4,9 +4,10 @@ FROM python:3.9-slim-bullseye
 # Set the working directory in the container
 WORKDIR /app
 
-# Add the "non-free" repository and install dependencies
+# Modify sources.list to include contrib and non-free, then install dependencies
 # The non-free repo is needed for the Intel driver
-RUN apt-get update \
+RUN sed -i 's/main/main contrib non-free/g' /etc/apt/sources.list \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
        curl \
        ffmpeg \
