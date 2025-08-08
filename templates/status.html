@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roku Bridge Status</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #2c2c2c;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #3a3a3a;
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        }
+        h1, h2 {
+            color: #7dd3fc;
+            border-bottom: 2px solid #4a4a4a;
+            padding-bottom: 10px;
+        }
+        /* NEW: Wrapper for the table to enable scrolling */
+        .table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+            border-radius: 8px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            min-width: 600px; /* Prevent table from becoming too squished */
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #4a4a4a;
+            white-space: nowrap; /* Prevent long URLs from wrapping */
+        }
+        th {
+            background-color: #4a4a4a;
+        }
+        .status-icon {
+            font-size: 1.5em;
+            text-align: center;
+        }
+        .status-icon .fa-check-circle { color: #28a745; }
+        .status-icon .fa-times-circle { color: #dc3545; }
+        .status-icon .fa-spinner { color: #7dd3fc; animation: spin 1s linear infinite; }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.2s;
+        }
+        .button:hover {
+            background-color: #0056b3;
+        }
+        .upload-section {
+            margin-top: 30px;
+        }
+        .upload-section input[type="file"] {
+            color: #e0e0e0;
+        }
+        .nav-links {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .nav-links a {
+            color: #7dd3fc;
+            text-decoration: none;
+            margin: 0 15px;
+            font-size: 1.1em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><i class="fa-solid fa-network-wired"></i> Roku Bridge Status</h1>
+        
+        <button class="button" onclick="fetchStatus()"><i class="fa-solid fa-sync"></i> Refresh Status</button>
+        
+        <!-- NEW: Added table-wrapper div -->
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tuner Name</th>
+                        <th>Roku IP</th>
+                        <th>Encoder URL</th>
+                        <th style="text-align: center;">Status</th>
+                    </tr>
+                </thead>
+                <tbody id="status-table-body">
+                    <!-- Status rows will be inserted here by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="upload-section">
+            <h2><i class="fa-solid fa-file-upload"></i> Update Configuration</h2>
+            <form id="upload-form" action="/upload_config" method="post" enctype="multipart/form-data">
+                <input type="file" name="file" id="file-input" required>
+                <button type="submit" class="button">Upload</button>
+            </form>
+            <p id="upload-status"></p>
+        </div>
+
+        <div class="nav-links">
+            <a href="/remote">Go to Remote</a>
+        </div>
+    </div>
+
+    <script>
+        const statusTableBody = document.getElementById('status-table-body');
+
+        function setInitialState(tuners) {
+            statusTableBody.innerHTML = '';
+            tuners.forEach(tuner => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${tuner.name}</td>
+                    <td>${tuner.roku_ip}</td>
+                    <td>${tuner.encoder_url}</td>
+                    <td class="status-icon" id="status-${tuner.roku_ip.replace(/\./g, '-')}">
+                        <i class="fas fa-spinner fa-spin"></i>
+                    </td>
+                `;
+                statusTableBody.appendChild(row);
+            });
+        }
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                if (statusTableBody.innerHTML === '' || statusTableBody.querySelectorAll('tr').length !== data.tuners.length) {
+                    setInitialState(data.tuners);
+                }
+
+                data.statuses.forEach(status => {
+                    const statusCell = document.getElementById(`status-${status.roku_ip.replace(/\./g, '-')}`);
+                    if (statusCell) {
+                        let iconHtml = '';
+                        if (status.roku_status === 'online' && status.encoder_status === 'online') {
+                            iconHtml = '<i class="fas fa-check-circle" title="Roku & Encoder Online"></i>';
+                        } else {
+                            if (status.roku_status !== 'online') {
+                                iconHtml += '<i class="fas fa-times-circle" title="Roku Offline"></i> ';
+                            } else {
+                                iconHtml += '<i class="fas fa-check-circle" title="Roku Online"></i> ';
+                            }
+                            if (status.encoder_status !== 'online') {
+                                iconHtml += '<i class="fas fa-times-circle" title="Encoder Offline"></i>';
+                            } else {
+                                iconHtml += '<i class="fas fa-check-circle" title="Encoder Online"></i>';
+                            }
+                        }
+                        statusCell.innerHTML = iconHtml.trim();
+                    }
+                });
+            } catch (error) {
+                console.error('Error fetching status:', error);
+                statusTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: #dc3545;">Failed to load status.</td></tr>';
+            }
+        }
+
+        document.getElementById('upload-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const formData = new FormData(this);
+            const uploadStatus = document.getElementById('upload-status');
+            
+            try {
+                const response = await fetch('/upload_config', {
+                    method: 'POST',
+                    body: formData
+                });
+                const message = await response.text();
+                uploadStatus.textContent = message;
+                uploadStatus.style.color = response.ok ? '#28a745' : '#dc3545';
+                if (response.ok) {
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                }
+            } catch (error) {
+                uploadStatus.textContent = 'Upload failed: ' + error.message;
+                uploadStatus.style.color = '#dc3545';
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStatus();
+            setInterval(fetchStatus, 30000); // Auto-refresh every 30 seconds
+        });
+    </script>
+</body>
+</html>
