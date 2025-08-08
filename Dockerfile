@@ -20,8 +20,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python requirements
+# Install build tools, then Python packages, then remove build tools to keep the image small
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential python3-dev \
+    && pip install --no-cache-dir -r requirements.txt \
+    && apt-get purge -y --auto-remove build-essential python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a mount point for persistent configuration
 RUN mkdir -p /app/config
@@ -35,3 +40,4 @@ EXPOSE 5000
 
 # Run the application
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--worker-class", "gevent", "--timeout", "0", "app:app"]
+
