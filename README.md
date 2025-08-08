@@ -23,18 +23,22 @@ The application is distributed as a multi-architecture Docker image, ready to ru
 
 Open a terminal or PowerShell and pull the latest image from Docker Hub.
 
+```
 docker pull rcvaughn2/roku-ecp-tuner
+```
 
 ### **Step 2: Run the Docker Container**
 
 Run the container using the command below. This command creates a persistent Docker volume named roku-bridge-config where your roku\_channels.json file will be safely stored.
 
-docker run \-d \\  
-  \--name roku-channels-bridge \\  
-  \-p 5006:5000 \\  
-  \-v roku-bridge-config:/app/config \\  
-  \--restart unless-stopped \\  
+```
+docker run -d \  
+  --name roku-channels-bridge \
+  -p 5006:5000 \ 
+  -v roku-bridge-config:/app/config \  
+  --restart unless-stopped \  
   rcvaughn2/roku-ecp-tuner
+```
 
 **Note on GPU Acceleration (Linux):** If you need hardware acceleration for the reencode mode, add the \--device=/dev/dri flag to the docker run command.
 
@@ -84,20 +88,22 @@ This is a list of your physical hardware setups (Roku \+ HDMI Encoder).
 
 **Example tuners section:**
 
-"tuners": \[  
+```
+"tuners": [  
   {  
     "name": "Roku 1",  
-    "roku\_ip": "192.168.1.10",  
-    "encoder\_url": "http://192.168.1.20/ts/1\_0",  
+    "roku_ip": "192.168.1.10",  
+    "encoder_url": "http://192.168.1.20/ts/1_0",  
     "priority": 1  
   },  
   {  
     "name": "Roku 2",  
-    "roku\_ip": "192.168.1.11",  
-    "encoder\_url": "rtsp://192.168.1.21:554/stream",  
+    "roku_ip": "192.168.1.11",  
+    "encoder_url": "rtsp://192.168.1.21:554/stream",  
     "priority": 2  
   }  
-\]
+]
+```
 
 ### **channels Section**
 
@@ -121,27 +127,29 @@ You can add these keys to any channel for more control:
 
 **Example channels section:**
 
-"channels": \[  
+```
+"channels": [  
   {  
-    "id": "philo\_cc",  
+    "id": "philo_cc",  
     "name": "Comedy Central",  
-    "roku\_app\_id": "196460",  
-    "deep\_link\_content\_id": "Q2hhbm5lbDo2MDg1NDg4OTk2NDg0Mzg0OTk",  
-    "media\_type": "live",  
-    "tvc\_guide\_stationid": "10149"  
+    "roku_app_id": "196460",  
+    "deep_link_content_id": "Q2hhbm5lbDo2MDg1NDg4OTk2NDg0Mzg0OTk",  
+    "media_type": "live",  
+    "tvc_guide_stationid": "10149"  
   },  
   {  
-    "id": "yt\_cbs",  
+    "id": "yt_cbs",  
     "name": "CBS",  
-    "roku\_app\_id": "20197",  
-    "deep\_link\_content\_id": "some\_youtube\_tv\_id",  
-    "media\_type": "live",  
-    "tvc\_guide\_stationid": "12345",  
-    "tune\_delay": 5,  
-    "enable\_cc": true,  
-    "cc\_delay": 8  
+    "roku_app_id": "20197",  
+    "deep_link_content_id": "some_youtube_tv_id",  
+    "media_type": "live",  
+    "tvc_guide_stationid": "12345",  
+    "tune_delay": 5,  
+    "enable_cc": true,  
+    "cc_delay": 8  
   }  
-\]
+]
+```
 
 ## **Advanced Settings**
 
