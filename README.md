@@ -13,21 +13,15 @@ This setup allows you to use streaming service channels (like those from YouTube
 * **Hardware Acceleration:** Automatically detects and uses NVIDIA (NVENC) or Intel (QSV) GPUs for video processing if available.  
 * **Persistent Configuration:** Uses a Docker volume to safely store your configuration, so it persists through container updates and restarts.
 
-## **Download**
+## **Installation**
 
-1. On the main page of the GitHub repository, click the green **\< \> Code** button.  
-2. In the dropdown menu, click **Download ZIP**.  
-3. Extract the ZIP file to a folder on the computer where you run Docker.
+The application is distributed as a multi-architecture Docker image, ready to run.
 
-## **Setup and Installation**
+### **Step 1: Pull the Docker Image**
 
-This new version simplifies setup significantly. You no longer need to manage a local roku\_channels.json file on your computer. The configuration is stored in a persistent Docker volume and managed entirely through the web interface.
+Open a terminal or PowerShell and pull the latest image from Docker Hub.
 
-### **Step 1: Build the Docker Image**
-
-Open a terminal or PowerShell, navigate to the folder containing the project files, and run the following command.
-
-docker build \-t roku-channels-bridge .
+docker pull rcvaughn2/roku-ecp-tuner
 
 ### **Step 2: Run the Docker Container**
 
@@ -38,9 +32,9 @@ docker run \-d \\
   \-p 5006:5000 \\  
   \-v roku-bridge-config:/app/config \\  
   \--restart unless-stopped \\  
-  roku-channels-bridge
+  rcvaughn2/roku-ecp-tuner
 
-**Note on GPU Acceleration (Linux):** If you need hardware acceleration, add the \--device=/dev/dri flag to the docker run command.
+**Note on GPU Acceleration (Linux):** If you need hardware acceleration for the reencode mode, add the \--device=/dev/dri flag to the docker run command.
 
 ### **Step 3: Configure Your Tuners**
 
