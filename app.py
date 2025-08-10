@@ -200,6 +200,11 @@ def stream_channel(channel_id):
         roku_tune_url = f"http://{locked_tuner['roku_ip']}:8060/launch/{channel_data['roku_app_id']}?contentId={channel_data['deep_link_content_id']}&mediaType={channel_data['media_type']}"
         requests.post(roku_tune_url, timeout=10)
         time.sleep(channel_data.get("tune_delay", 3))
+        # Removed CC logic
+        if channel_data.get("needs_select_keypress"):
+            time.sleep(1) # Add a small delay before sending select
+            requests.post(f"http://{locked_tuner['roku_ip']}:8060/keypress/Select", timeout=5)
+
     except requests.exceptions.RequestException as e:
         release_tuner(locked_tuner['roku_ip'])
         return f"Failed to tune Roku: {e}", 500
