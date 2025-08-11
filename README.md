@@ -1,6 +1,6 @@
 # **Roku Channels Bridge**
 
-**Release: Beta 1.2**
+**Release: Beta 1.3**
 
 This project provides a Dockerized bridge that integrates your Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and uses this script to manage channel changes and proxy the video stream.
 
@@ -162,6 +162,12 @@ Choose the right mode to balance performance and stability by adding the `-e ENC
   * **`reencode`:**
       * **CPU Usage:** Low
       * **Description:** **(Recommended for fixing issues)** Copies the video stream as-is but re-encodes the audio. This fixes most common stream problems (like audio corruption) with minimal CPU impact.
+
+### **Set Audio Bitrate (for `reencode` mode)**
+
+To adjust the audio quality when using the `reencode` mode, you can set the `AUDIO_BITRATE` environment variable. A higher value like `192k` can improve sound quality, while the default is `128k`.
+
+To set the audio bitrate, add the `-e AUDIO_BITRATE=<bitrate>` flag to your `docker run` command (e.g., `-e AUDIO_BITRATE=192k`).
 
 ### **Enable Debug Logging**
 
