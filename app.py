@@ -23,6 +23,9 @@ CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
+# Add this line for configurable audio bitrate
+AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
+
 
 # --- State Management for Tuner Pool ---
 TUNERS = []
@@ -153,12 +156,14 @@ def reencode_stream_generator(encoder_url, roku_ip_to_release):
     try:
         command = [
             'ffmpeg',
+            '-analyzeduration', '1M',
+            '-probesize', '1M',
             '-err_detect', 'ignore_err',
             '-fflags', '+genpts',
             '-i', encoder_url,
             '-c:v', 'copy',
             '-c:a', 'aac',
-            '-b:a', '128k',
+            '-b:a', AUDIO_BITRATE,
             '-f', 'mpegts',
             '-loglevel', 'error',
             '-'
@@ -179,7 +184,14 @@ def remux_stream_generator(encoder_url, roku_ip_to_release):
     """Generator for the low-CPU ffmpeg remuxing method."""
     try:
         command = [
-            'ffmpeg', '-i', encoder_url, '-c', 'copy', '-f', 'mpegts', '-loglevel', 'error', '-'
+            'ffmpeg',
+            '-analyzeduration', '1M',
+            '-probesize', '1M',
+            '-i', encoder_url,
+            '-c', 'copy',
+            '-f', 'mpegts',
+            '-loglevel', 'error',
+            '-'
         ]
         if DEBUG_LOGGING_ENABLED: logging.info(f"Starting FFMPEG REMUX for tuner {roku_ip_to_release}")
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
