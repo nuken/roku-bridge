@@ -1,6 +1,6 @@
 # **Roku Channels Bridge**
 
-**Release: Beta 1.3**
+**Release: Beta 1.4**
 
 This project provides a Dockerized bridge that integrates your Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and uses this script to manage channel changes and proxy the video stream.
 
