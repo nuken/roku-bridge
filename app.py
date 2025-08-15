@@ -23,13 +23,13 @@ CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
-# NEW: Configurable audio bitrate
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 
 
 # --- State Management for Tuner Pool ---
 TUNERS = []
 CHANNELS = []
+EPG_CHANNELS = [] # New list for EPG channels
 TUNER_LOCK = threading.Lock()
 ENCODER_SETTINGS = {}
 
@@ -63,23 +63,23 @@ def get_encoder_options():
 
 def load_config():
     """Loads tuner and channel configuration. Creates a default if not found."""
-    global TUNERS, CHANNELS
+    global TUNERS, CHANNELS, EPG_CHANNELS
     if not os.path.exists(CONFIG_FILE_PATH):
         logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating a default empty config.")
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump({"tuners": [], "channels": []}, f, indent=2)
+                json.dump({"tuners": [], "channels": [], "epg_channels": []}, f, indent=2)
         except Exception as e:
             logging.error(f"Could not create default config file: {e}")
-            TUNERS, CHANNELS = [], []
+            TUNERS, CHANNELS, EPG_CHANNELS = [], [], []
             return
 
     try:
         with open(CONFIG_FILE_PATH, 'r') as f:
             content = f.read()
             if not content:
-                config_data = {"tuners": [], "channels": []}
+                config_data = {"tuners": [], "channels": [], "epg_channels": []}
             else:
                 config_data = json.loads(content)
 
@@ -87,10 +87,11 @@ def load_config():
         for tuner in TUNERS:
             tuner['in_use'] = False
         CHANNELS = config_data.get('channels', [])
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Loaded {len(TUNERS)} tuners and {len(CHANNELS)} channels.")
+        EPG_CHANNELS = config_data.get('epg_channels', []) # Load epg_channels
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote channels, and {len(EPG_CHANNELS)} EPG channels.")
     except (json.JSONDecodeError, Exception) as e:
         logging.error(f"Error loading config file: {e}. It might be empty or corrupted.")
-        TUNERS, CHANNELS = [], []
+        TUNERS, CHANNELS, EPG_CHANNELS = [], [], []
 
 def lock_tuner():
     """Finds and locks an available tuner."""
@@ -221,14 +222,47 @@ def proxy_stream_generator(encoder_url, roku_ip_to_release):
 
 # --- Flask Routes ---
 
-@app.route('/channels.m3u')
-def generate_m3u():
+def generate_m3u_from_channels(channel_list):
+    """Generic M3U generator."""
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
-    for channel in CHANNELS:
+    for channel in channel_list:
         stream_url = f"http://{request.host}/stream/{channel['id']}"
-        m3u_content.append(f'#EXTINF:-1 tvg-id="{channel["id"]}" tvg-name="{channel["name"]}" tvc-guide-stationid="{channel["tvc_guide_stationid"]}",{channel["name"]}')
+        extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
+
+        tags_to_add = {
+            "tvg-name": "name",
+            "channel-number": "channel-number",
+            "tvg-logo": "tvg-logo",
+            "tvc-guide-title": "tvc-guide-title",
+            "tvc-guide-description": "tvc-guide-description",
+            "tvc-guide-art": "tvc-guide-art",
+            "tvc-guide-tags": "tvc-guide-tags",
+            "tvc-guide-genres": "tvc-guide-genres",
+            "tvc-guide-categories": "tvc-guide-categories",
+            "tvc-guide-placeholders": "tvc-guide-placeholders",
+            "tvc-stream-vcodec": "tvc-stream-vcodec",
+            "tvc-stream-acodec": "tvc-stream-acodec",
+            "tvc-guide-stationid": "tvc_guide_stationid" # Corrected typo here
+        }
+
+        for tag, key in tags_to_add.items():
+            if key in channel:
+                extinf_line += f' {tag}="{channel[key]}"'
+        
+        extinf_line += f',{channel["name"]}'
+        
+        m3u_content.append(extinf_line)
         m3u_content.append(stream_url)
+        
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
+
+@app.route('/channels.m3u')
+def generate_gracenote_m3u():
+    return generate_m3u_from_channels(CHANNELS)
+
+@app.route('/epg_channels.m3u')
+def generate_epg_m3u():
+    return generate_m3u_from_channels(EPG_CHANNELS)
 
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
@@ -237,7 +271,11 @@ def stream_channel(channel_id):
     if not locked_tuner:
         return "All tuners are currently in use.", 503
 
+    # Look for the channel in both lists
     channel_data = next((c for c in CHANNELS if c["id"] == channel_id), None)
+    if not channel_data:
+        channel_data = next((c for c in EPG_CHANNELS if c["id"] == channel_id), None)
+
     if not channel_data:
         release_tuner(locked_tuner['roku_ip'])
         return "Channel not found.", 404
@@ -245,7 +283,6 @@ def stream_channel(channel_id):
     roku_ip = locked_tuner['roku_ip']
 
     try:
-        # --- URL ENCODING FIX IS RE-APPLIED HERE ---
         base_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
         content_id = channel_data['deep_link_content_id']
         media_type = channel_data['media_type']
@@ -257,7 +294,6 @@ def stream_channel(channel_id):
         
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Constructed tune URL: {roku_tune_url}")
-        # --- END OF FIX ---
 
         tune_future = executor.submit(tune_roku_async, roku_ip, roku_tune_url)
 
