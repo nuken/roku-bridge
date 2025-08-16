@@ -56,10 +56,10 @@ def get_encoder_options():
             if DEBUG_LOGGING_ENABLED: logging.info("Intel QSV detected.")
             return {"codec": "h264_qsv", "preset_args": [], "hwaccel_args": ['-hwaccel', 'qsv', '-c:v', 'h264_qsv']}
         if DEBUG_LOGGING_ENABLED: logging.info("No hardware acceleration detected. Using software encoding.")
-        return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
+        return {"codec": "libx264", "preset_args": ['-preset', 'ultrafast'], "hwaccel_args": []}
     except Exception as e:
         logging.error(f"ffmpeg detection failed: {e}. Defaulting to software encoding.")
-        return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
+        return {"codec": "libx264", "preset_args": ['-preset', 'ultrafast'], "hwaccel_args": []}
 
 def load_config():
     """Loads tuner and channel configuration. Creates a default if not found."""
