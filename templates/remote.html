@@ -51,6 +51,36 @@
             background-repeat: no-repeat;
             background-position: right 10px center;
         }
+        .keyboard-section {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+        .keyboard-section input[type="text"] {
+            flex-grow: 1;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #555;
+            background-color: #4a4a4a;
+            color: #e0e0e0;
+            font-size: 1em;
+            /* Added to prevent the input from growing too large */
+            min-width: 0;
+        }
+        .keyboard-section button {
+             /* CORRECTED: Adjusted padding to be more responsive */
+            padding: 12px;
+            border-radius: 12px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .keyboard-section button:hover {
+            background-color: #0056b3;
+        }
         .grid-container {
             display: grid;
             gap: 15px;
@@ -120,6 +150,12 @@
                 <option value="">Select a Roku Device</option>
             </select>
         </div>
+        
+        <div class="keyboard-section">
+            <input type="text" id="keyboard-input" placeholder="Type here...">
+            <button onclick="sendText()"><i class="fa-solid fa-paper-plane"></i></button>
+        </div>
+
         <div class="grid-container">
             <div class="button-row">
                 <button class="remote-button" id="button-back" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
@@ -201,7 +237,8 @@
                 return;
             }
             try {
-                const response = await fetch(`/remote/keypress/${selectedDeviceIp}/${key}`, { method: 'POST' });
+                const encodedKey = encodeURIComponent(key);
+                const response = await fetch(`/remote/keypress/${selectedDeviceIp}/${encodedKey}`, { method: 'POST' });
                 const result = await response.json();
                 if (result.status !== 'success') {
                     showNotification(`Error: ${result.message}`);
@@ -210,6 +247,25 @@
                 console.error(`Failed to send key ${key}:`, error);
                 showNotification('Failed to send command.');
             }
+        }
+        
+        async function sendText() {
+            const textInput = document.getElementById('keyboard-input');
+            const text = textInput.value;
+            if (!text) {
+                return;
+            }
+            if (!selectedDeviceIp) {
+                showNotification('Please select a device first.');
+                return;
+            }
+            
+            for (const char of text) {
+                await sendKey(`Lit_${char}`);
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+            }
+            
+            textInput.value = '';
         }
 
         document.addEventListener('DOMContentLoaded', loadDevices);
