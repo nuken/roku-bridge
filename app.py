@@ -6,6 +6,7 @@ import requests
 import time
 import threading
 import httpx
+import urllib.parse # Added for URL encoding
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
 
@@ -56,10 +57,10 @@ def get_encoder_options():
             if DEBUG_LOGGING_ENABLED: logging.info("Intel QSV detected.")
             return {"codec": "h264_qsv", "preset_args": [], "hwaccel_args": ['-hwaccel', 'qsv', '-c:v', 'h264_qsv']}
         if DEBUG_LOGGING_ENABLED: logging.info("No hardware acceleration detected. Using software encoding.")
-        return {"codec": "libx264", "preset_args": ['-preset', 'ultrafast'], "hwaccel_args": []}
+        return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
     except Exception as e:
         logging.error(f"ffmpeg detection failed: {e}. Defaulting to software encoding.")
-        return {"codec": "libx264", "preset_args": ['-preset', 'ultrafast'], "hwaccel_args": []}
+        return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
 
 def load_config():
     """Loads tuner and channel configuration. Creates a default if not found."""
@@ -242,7 +243,7 @@ def generate_m3u_from_channels(channel_list):
             "tvc-guide-placeholders": "tvc-guide-placeholders",
             "tvc-stream-vcodec": "tvc-stream-vcodec",
             "tvc-stream-acodec": "tvc-stream-acodec",
-            "tvc-guide-stationid": "tvc_guide_stationid" # Corrected typo here
+            "tvc-guide-stationid": "tvc_guide_stationid"
         }
 
         for tag, key in tags_to_add.items():
@@ -360,7 +361,10 @@ def remote_keypress(device_ip, key):
     if not any(tuner['roku_ip'] == device_ip for tuner in TUNERS):
         return jsonify({"status": "error", "message": "Device not found."}), 404
     try:
-        roku_session.post(f"http://{device_ip}:8060/keypress/{key}")
+        # CORRECTED: The key is now properly encoded before being sent to the Roku device.
+        # Flask decodes the URL from the browser, so we must re-encode it for the Roku.
+        safe_key = urllib.parse.quote(key)
+        roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
