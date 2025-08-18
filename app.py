@@ -25,7 +25,16 @@ CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
-AUDIO_CHANNELS = os.getenv('AUDIO_CHANNELS', '2')
+
+def get_audio_channels():
+    channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
+    if channels_input == "5.1":
+        return '6'
+    if channels_input == "7.1":
+        return '8'
+    return channels_input
+
+AUDIO_CHANNELS = get_audio_channels()
 
 
 # --- State Management for Tuner Pool ---
