@@ -6,6 +6,8 @@ This project provides a Dockerized bridge that integrates your Roku devices as t
 
 This setup allows you to use streaming service channels (like those from YouTube TV, Philo, etc.) just like traditional cable channels inside the Channels app.
 
+-----
+
 ## **Key Features**
 
   * **Seamless Integration:** Adds Roku-based channels directly into your Channels DVR guide.
@@ -15,6 +17,8 @@ This setup allows you to use streaming service channels (like those from YouTube
   * **Flexible Streaming Modes:** Choose between proxy, remux, or an efficient audio-only reencode mode to ensure stream stability with minimal CPU usage.
   * **Hardware Acceleration:** Automatically detects and uses NVIDIA (NVENC) or Intel (QSV) GPUs for video processing if available.
   * **Persistent Configuration:** Uses a Docker volume to safely store your configuration, so it persists through container updates and restarts.
+
+-----
 
 ## **Installation**
 
@@ -53,6 +57,8 @@ docker run -d \
 
 The page will confirm the upload was successful and will automatically refresh, showing the status of your newly configured tuners. Your setup is now complete.
 
+-----
+
 ## **Usage**
 
 ### **Channels DVR Setup**
@@ -75,6 +81,8 @@ To add a source:
       * Upload a new `roku_channels.json` file at any time.
   * **Remote Control:** `http://<IP_OF_DOCKER_HOST>:5006/remote`
       * A full-featured remote control for any Roku device listed in your configuration file.
+
+-----
 
 ## **Configuration (roku\_channels.json)**
 
@@ -174,6 +182,8 @@ Below is a list of all supported tags you can add to each channel in this sectio
 ]
 ```
 
+-----
+
 ## **Advanced Settings**
 
 ### **Stream Handling Modes (ENCODING\_MODE)**
@@ -190,7 +200,12 @@ To adjust audio quality, set the `AUDIO_BITRATE` environment variable (e.g., `-e
 
 ### **Set Audio Channels (for `reencode` mode)**
 
-To set the number of audio channels for re-encoding, use the `AUDIO_CHANNELS` environment variable. The default is `2` (stereo). For 5.1 surround sound, you would use `6`. (e.g., `-e AUDIO_CHANNELS=6`).
+To set the number of audio channels for re-encoding, use the `AUDIO_CHANNELS` environment variable. The default is `2` (stereo). You can use common names like **`5.1`** (for 6 channels) or **`7.1`** (for 8 channels) to configure surround sound.
+
+**Examples:**
+
+  * `-e AUDIO_CHANNELS=5.1`
+  * `-e AUDIO_CHANNELS=6`
 
 ### **Enable Debug Logging**
 
