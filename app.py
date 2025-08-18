@@ -25,6 +25,7 @@ CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
+AUDIO_CHANNELS = os.getenv('AUDIO_CHANNELS', '2')
 
 
 # --- State Management for Tuner Pool ---
@@ -166,12 +167,13 @@ def reencode_stream_generator(encoder_url, roku_ip_to_release):
             '-c:v', 'copy',
             '-c:a', 'aac',
             '-b:a', AUDIO_BITRATE,
+            '-ac', AUDIO_CHANNELS,
             '-f', 'mpegts',
             '-loglevel', 'error',
             '-'
         ]
         if DEBUG_LOGGING_ENABLED:
-            logging.info(f"Starting FFMPEG RE-ENCODE (Audio Only) for tuner {roku_ip_to_release}")
+            logging.info(f"Starting FFMPEG RE-ENCODE (Audio Only) for tuner {roku_ip_to_release} with {AUDIO_CHANNELS} audio channels.")
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for chunk in iter(lambda: process.stdout.read(8192), b''):
             yield chunk
