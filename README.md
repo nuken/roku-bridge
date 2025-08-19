@@ -86,7 +86,7 @@ To add a source:
 
 ## **Configuration (roku\_channels.json)**
 
-This file is the heart of your setup. For a detailed walkthrough on how to find the required information (like `roku_app_id` and `deep_link_content_id`), please refer to the [**Official Configuration Guide**](https://nuken.ct.ws/tuner).
+This file is the heart of your setup. For a detailed walkthrough on how to find the required information (like `roku_app_id` and `deep_link_content_id`), please refer to the [**Official Configuration Guide**](https://tuner.ct.ws).
 
 The file is a JSON document split into three main sections: `tuners`, `channels`, and `epg_channels`.
 
