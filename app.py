@@ -7,6 +7,7 @@ import time
 import threading
 import httpx
 import urllib.parse # Added for URL encoding
+import signal # Added for Gunicorn reload
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
 
@@ -331,11 +332,17 @@ def stream_channel(channel_id):
         release_tuner(roku_ip)
         return f"Failed to tune Roku: {e}", 500
 
-    if ENCODING_MODE == 'reencode':
+    # Determine the encoding mode for this specific tuner, falling back to the global setting.
+    tuner_encoding_mode = locked_tuner.get('encoding_mode', ENCODING_MODE)
+
+    if DEBUG_LOGGING_ENABLED:
+        logging.info(f"Using '{tuner_encoding_mode}' mode for tuner {roku_ip}")
+
+    if tuner_encoding_mode == 'reencode':
         stream_generator = reencode_stream_generator(locked_tuner['encoder_url'], roku_ip)
-    elif ENCODING_MODE == 'remux':
+    elif tuner_encoding_mode == 'remux':
         stream_generator = remux_stream_generator(locked_tuner['encoder_url'], roku_ip)
-    else:
+    else: # Defaults to 'proxy'
         stream_generator = proxy_stream_generator(locked_tuner['encoder_url'], roku_ip)
 
     return Response(stream_with_context(stream_generator), mimetype='video/mpeg')
@@ -348,7 +355,19 @@ def upload_config():
     try:
         file.save(CONFIG_FILE_PATH)
         load_config()
-        return "Configuration updated successfully. Refreshing...", 200
+
+        # --- MODIFIED SECTION ---
+        # Gracefully restart the Gunicorn worker to apply the new config.
+        # This tells the master process to restart this worker.
+        try:
+            master_pid = os.getppid()
+            logging.info(f"Configuration updated. Sending SIGHUP to master process (PID: {master_pid}) to reload worker.")
+            os.kill(master_pid, signal.SIGHUP)
+        except Exception as e:
+            logging.error(f"Could not signal Gunicorn to reload: {e}")
+        # --- END OF MODIFIED SECTION ---
+
+        return "Configuration updated successfully. Server is reloading...", 200
     except Exception as e:
         return f"Error processing config file: {e}", 400
 
