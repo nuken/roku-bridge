@@ -38,6 +38,5 @@ COPY templates/ /app/templates/
 # Expose the port the app runs on
 EXPOSE 5000
 
-# Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--worker-class", "gevent", "--timeout", "0", "app:app"]
-
+# Run the application with a single worker to ensure config reloads work correctly
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--worker-class", "gevent", "--workers", "1", "--timeout", "0", "app:app"]
