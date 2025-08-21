@@ -1,498 +1,366 @@
-import subprocess
-import logging
-import json
-import os
-import requests
-import time
-import threading
-import httpx
-import urllib.parse # Added for URL encoding
-import signal # Added for Gunicorn reload
-from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, request, jsonify, Response, stream_with_context, render_template
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roku Remote</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #2c2c2c;
+            --surface-color: #3a3a3a;
+            --primary-color: #7dd3fc;
+            --text-color: #e0e0e0;
+            --border-color: #4a4a4a;
+            --button-color: #007bff;
+            --button-hover-color: #0056b3;
+            --error-color: #dc3545;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .remote-container {
+            background-color: var(--surface-color);
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+            width: 100%;
+            max-width: 320px;
+            box-sizing: border-box;
+        }
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+        .device-selector {
+            margin-bottom: 25px;
+        }
+        .device-selector select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #555;
+            background-color: var(--border-color);
+            color: var(--text-color);
+            font-size: 1em;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url('data:image/svg+xml;utf8,<svg fill="%23e0e0e0" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+        }
+        .keyboard-section {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+        .keyboard-section input[type="text"] {
+            flex-grow: 1;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #555;
+            background-color: var(--border-color);
+            color: var(--text-color);
+            font-size: 1em;
+            min-width: 0;
+        }
+        .keyboard-section button {
+            padding: 12px;
+            border-radius: 12px;
+            border: none;
+            background-color: var(--button-color);
+            color: white;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .keyboard-section button:hover {
+            background-color: var(--button-hover-color);
+        }
+        .grid-container {
+            display: grid;
+            gap: 15px;
+        }
+        .button-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            justify-items: center;
+        }
+        .d-pad {
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 15px;
+            display: grid;
+        }
+        .remote-button {
+            background-color: #555;
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            width: 65px;
+            height: 65px;
+            font-size: 1.5em;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .remote-button:active {
+            background-color: #777;
+            transform: scale(0.95);
+        }
+        .d-pad .remote-button {
+            border-radius: 15px;
+        }
+        #button-up { grid-area: 1 / 2 / 2 / 3; }
+        #button-left { grid-area: 2 / 1 / 3 / 2; }
+        #button-ok { grid-area: 2 / 2 / 3 / 3; background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; font-size: 1.2em; }
+        #button-right { grid-area: 2 / 3 / 3 / 4; }
+        #button-down { grid-area: 3 / 2 / 4 / 3; }
 
-app = Flask(__name__)
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            z-index: 1001;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .notification.show {
+            opacity: 1;
+        }
+        
+        /* --- New Modal Styles --- */
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
+            overflow: auto; background-color: rgba(0,0,0,0.6);
+            align-items: center; justify-content: center;
+        }
+        .modal-content {
+            background-color: var(--surface-color); padding: 25px; border-radius: 12px;
+            width: 90%; max-width: 400px; box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        .modal-header { 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding-bottom: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color);
+        }
+        .modal-header h3 { margin: 0; color: var(--primary-color); font-size: 1.2em; }
+        .close-button { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .modal-body p { margin-top: 0; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px; }
+        .modal-button {
+            padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer;
+            font-size: 1em; transition: background-color 0.2s;
+        }
+        .modal-button.cancel { background-color: #6c757d; color: white; }
+        .modal-button.confirm { background-color: var(--error-color); color: white; }
+        .modal-button.cancel:hover { background-color: #5a6268; }
+        .modal-button.confirm:hover { background-color: #c82333; }
 
-# --- Disable caching ---
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
-app.config['TEMPLATES_AUTO_RELOAD'] = True
+    </style>
+</head>
+<body>
+    <div class="remote-container">
+        <h1><i class="fa-solid fa-satellite-dish"></i> Roku Remote</h1>
+        <div class="device-selector">
+            <select id="device-select" onchange="selectDevice()">
+                <option value="">Select a Roku Device</option>
+            </select>
+        </div>
+        
+        <div class="keyboard-section">
+            <input type="text" id="keyboard-input" placeholder="Type here...">
+            <button onclick="sendText()"><i class="fa-solid fa-paper-plane"></i></button>
+        </div>
 
-# --- Basic Configuration ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        <div class="grid-container">
+            <div class="button-row">
+                <button class="remote-button" id="button-back" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                <button class="remote-button" id="button-home" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
+                <button class="remote-button" id="button-reboot" onclick="rebootDevice()"><i class="fa-solid fa-power-off"></i></button>
+            </div>
+            <div class="d-pad">
+                <button class="remote-button" id="button-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                <button class="remote-button" id="button-left" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                <button class="remote-button" id="button-ok" onclick="sendKey('Select')">OK</button>
+                <button class="remote-button" id="button-right" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                <button class="remote-button" id="button-down" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+            </div>
+            <div class="button-row">
+                <button class="remote-button" id="button-rewind" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
+                <button class="remote-button" id="button-play-pause" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                <button class="remote-button" id="button-fast-forward" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
+            </div>
+        </div>
+    </div>
+    <div id="notification-area"></div>
 
-# --- Environment & Global Variables ---
-CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
-CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
-DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
-ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
-AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
+    <div id="reboot-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirm Reboot</h3>
+                <span class="close-button" onclick="closeRebootModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to reboot this Roku device?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-button cancel" onclick="closeRebootModal()">Cancel</button>
+                <button class="modal-button confirm" onclick="confirmReboot()">Reboot</button>
+            </div>
+        </div>
+    </div>
 
-def get_audio_channels():
-    channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
-    if channels_input == "5.1":
-        return '6'
-    if channels_input == "7.1":
-        return '8'
-    return channels_input
+    <script>
+        const deviceSelect = document.getElementById('device-select');
+        let selectedDeviceIp = '';
 
-AUDIO_CHANNELS = get_audio_channels()
+        function showNotification(message) {
+            const notificationArea = document.getElementById('notification-area');
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.textContent = message;
+            notificationArea.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 10);
 
-
-# --- State Management for Tuner Pool ---
-TUNERS = []
-CHANNELS = []
-EPG_CHANNELS = [] # New list for EPG channels
-TUNER_LOCK = threading.Lock()
-ENCODER_SETTINGS = {}
-
-# Create persistent HTTP session for Roku commands
-roku_session = requests.Session()
-roku_session.timeout = 3
-roku_session.headers.update({'Connection': 'keep-alive'})
-
-# Thread pool for concurrent operations
-executor = ThreadPoolExecutor(max_workers=4)
-
-# --- Core Application Logic ---
-
-def get_encoder_options():
-    """Detects available ffmpeg hardware acceleration."""
-    if DEBUG_LOGGING_ENABLED: logging.info("Detecting available hardware acceleration encoders...")
-    try:
-        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, check=True)
-        available_encoders = result.stdout
-        if 'h264_nvenc' in available_encoders:
-            if DEBUG_LOGGING_ENABLED: logging.info("NVIDIA NVENC detected.")
-            return {"codec": "h264_nvenc", "preset_args": ['-preset', 'p2'], "hwaccel_args": []}
-        if 'h264_qsv' in available_encoders:
-            if DEBUG_LOGGING_ENABLED: logging.info("Intel QSV detected.")
-            return {"codec": "h264_qsv", "preset_args": [], "hwaccel_args": ['-hwaccel', 'qsv', '-c:v', 'h264_qsv']}
-        if DEBUG_LOGGING_ENABLED: logging.info("No hardware acceleration detected. Using software encoding.")
-        return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
-    except Exception as e:
-        logging.error(f"ffmpeg detection failed: {e}. Defaulting to software encoding.")
-        return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
-
-def load_config():
-    """Loads tuner and channel configuration. Creates a default if not found."""
-    global TUNERS, CHANNELS, EPG_CHANNELS
-    if not os.path.exists(CONFIG_FILE_PATH):
-        logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating a default empty config.")
-        try:
-            os.makedirs(CONFIG_DIR, exist_ok=True)
-            with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump({"tuners": [], "channels": [], "epg_channels": []}, f, indent=2)
-        except Exception as e:
-            logging.error(f"Could not create default config file: {e}")
-            TUNERS, CHANNELS, EPG_CHANNELS = [], [], []
-            return
-
-    try:
-        with open(CONFIG_FILE_PATH, 'r') as f:
-            content = f.read()
-            if not content:
-                config_data = {"tuners": [], "channels": [], "epg_channels": []}
-            else:
-                config_data = json.loads(content)
-
-        TUNERS = sorted(config_data.get('tuners', []), key=lambda x: x.get('priority', 99))
-        for tuner in TUNERS:
-            tuner['in_use'] = False
-        CHANNELS = config_data.get('channels', [])
-        EPG_CHANNELS = config_data.get('epg_channels', []) # Load epg_channels
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote channels, and {len(EPG_CHANNELS)} EPG channels.")
-    except (json.JSONDecodeError, Exception) as e:
-        logging.error(f"Error loading config file: {e}. It might be empty or corrupted.")
-        TUNERS, CHANNELS, EPG_CHANNELS = [], [], []
-
-def lock_tuner():
-    """Finds and locks an available tuner."""
-    with TUNER_LOCK:
-        for tuner in TUNERS:
-            if not tuner.get('in_use'):
-                tuner['in_use'] = True
-                if DEBUG_LOGGING_ENABLED: logging.info(f"Locked tuner: {tuner.get('name', tuner.get('roku_ip'))}")
-                return tuner
-    return None
-
-def release_tuner(tuner_ip):
-    """Releases a locked tuner and sends a 'Home' command to the Roku."""
-    with TUNER_LOCK:
-        for tuner in TUNERS:
-            if tuner.get('roku_ip') == tuner_ip:
-                tuner['in_use'] = False
-                if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name', tuner.get('roku_ip'))}")
-
-                def send_home_async():
-                    try:
-                        home_url = f"http://{tuner_ip}:8060/keypress/Home"
-                        roku_session.post(home_url)
-                        if DEBUG_LOGGING_ENABLED:
-                            logging.info(f"Sent 'Home' command to Roku at {tuner_ip}")
-                    except requests.exceptions.RequestException as e:
-                        if DEBUG_LOGGING_ENABLED:
-                            logging.warning(f"Failed to send 'Home' command to Roku at {tuner_ip}: {e}")
-
-                executor.submit(send_home_async)
-                break
-
-def tune_roku_async(roku_ip, tune_url):
-    """Tune Roku in a separate thread to reduce blocking."""
-    try:
-        response = roku_session.post(tune_url)
-        response.raise_for_status()
-        return True
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to tune Roku at {roku_ip}: {e}")
-        return False
-
-def send_additional_commands(roku_ip, channel_data):
-    """Send additional commands (Select) after tuning delay."""
-    try:
-        if channel_data.get('needs_select_keypress'):
-            select_url = f"http://{roku_ip}:8060/keypress/Select"
-            roku_session.post(select_url)
-            if DEBUG_LOGGING_ENABLED:
-                logging.info(f"Sent Select keypress to {roku_ip}")
-            time.sleep(0.5)
-
-    except requests.exceptions.RequestException as e:
-        if DEBUG_LOGGING_ENABLED:
-            logging.warning(f"Failed to send additional commands to {roku_ip}: {e}")
-
-# --- Streaming Functions ---
-
-def reencode_stream_generator(encoder_url, roku_ip_to_release):
-    """Generator for a more optimized ffmpeg method.
-    It copies the video stream and re-encodes only the audio.
-    This is much less CPU-intensive than a full re-encode."""
-    try:
-        command = [
-            'ffmpeg',
-            '-analyzeduration', '1M',
-            '-probesize', '1M',
-            '-err_detect', 'ignore_err',
-            '-fflags', '+genpts',
-            '-i', encoder_url,
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-b:a', AUDIO_BITRATE,
-            '-ac', AUDIO_CHANNELS,
-            '-f', 'mpegts',
-            '-loglevel', 'error',
-            '-'
-        ]
-        if DEBUG_LOGGING_ENABLED:
-            logging.info(f"Starting FFMPEG RE-ENCODE (Audio Only) for tuner {roku_ip_to_release} with {AUDIO_CHANNELS} audio channels.")
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for chunk in iter(lambda: process.stdout.read(8192), b''):
-            yield chunk
-        process.wait()
-        if process.returncode != 0:
-            stderr_output = process.stderr.read().decode()
-            logging.error(f"ffmpeg for {roku_ip_to_release} exited with error: {stderr_output}")
-    finally:
-        release_tuner(roku_ip_to_release)
-
-def remux_stream_generator(encoder_url, roku_ip_to_release):
-    """Generator for the low-CPU ffmpeg remuxing method."""
-    try:
-        command = [
-            'ffmpeg',
-            '-analyzeduration', '1M',
-            '-probesize', '1M',
-            '-i', encoder_url,
-            '-c', 'copy',
-            '-f', 'mpegts',
-            '-loglevel', 'error',
-            '-'
-        ]
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting FFMPEG REMUX for tuner {roku_ip_to_release}")
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for chunk in iter(lambda: process.stdout.read(8192), b''):
-            yield chunk
-        process.wait()
-        if process.returncode != 0:
-            logging.error(f"ffmpeg for {roku_ip_to_release} exited with error: {process.stderr.read().decode()}")
-    finally:
-        release_tuner(roku_ip_to_release)
-
-def proxy_stream_generator(encoder_url, roku_ip_to_release):
-    """Generator for the low-CPU, resilient HTTPX proxy method."""
-    try:
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting HTTPX PROXY for tuner {roku_ip_to_release}")
-        transport = httpx.HTTPTransport(retries=5)
-        timeout = httpx.Timeout(15.0)
-        with httpx.Client(timeout=timeout, transport=transport, follow_redirects=True) as client:
-            with client.stream("GET", encoder_url) as r:
-                r.raise_for_status()
-                for data in r.iter_bytes():
-                    yield data
-    except Exception as e:
-        logging.error(f"Error in proxy_stream_generator for {roku_ip_to_release}: {e}")
-    finally:
-        release_tuner(roku_ip_to_release)
-
-# --- Flask Routes ---
-
-def generate_m3u_from_channels(channel_list):
-    """Generic M3U generator."""
-    m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
-    for channel in channel_list:
-        stream_url = f"http://{request.host}/stream/{channel['id']}"
-        extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
-
-        tags_to_add = {
-            "tvg-name": "name",
-            "channel-number": "channel-number",
-            "tvg-logo": "tvg-logo",
-            "tvc-guide-title": "tvc-guide-title",
-            "tvc-guide-description": "tvc-guide-description",
-            "tvc-guide-art": "tvc-guide-art",
-            "tvc-guide-tags": "tvc-guide-tags",
-            "tvc-guide-genres": "tvc-guide-genres",
-            "tvc-guide-categories": "tvc-guide-categories",
-            "tvc-guide-placeholders": "tvc-guide-placeholders",
-            "tvc-stream-vcodec": "tvc-stream-vcodec",
-            "tvc-stream-acodec": "tvc-stream-acodec",
-            "tvc-guide-stationid": "tvc_guide_stationid"
+            setTimeout(() => {
+                notification.classList.remove('show');
+                notification.addEventListener('transitionend', () => notification.remove());
+            }, 2000);
         }
 
-        for tag, key in tags_to_add.items():
-            if key in channel:
-                extinf_line += f' {tag}="{channel[key]}"'
-        
-        extinf_line += f',{channel["name"]}'
-        
-        m3u_content.append(extinf_line)
-        m3u_content.append(stream_url)
-        
-    return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
-
-@app.route('/channels.m3u')
-def generate_gracenote_m3u():
-    return generate_m3u_from_channels(CHANNELS)
-
-@app.route('/epg_channels.m3u')
-def generate_epg_m3u():
-    return generate_m3u_from_channels(EPG_CHANNELS)
-
-@app.route('/stream/<channel_id>')
-def stream_channel(channel_id):
-    start_time = time.time()
-    locked_tuner = lock_tuner()
-    if not locked_tuner:
-        return "All tuners are currently in use.", 503
-
-    # Look for the channel in both lists
-    channel_data = next((c for c in CHANNELS if c["id"] == channel_id), None)
-    if not channel_data:
-        channel_data = next((c for c in EPG_CHANNELS if c["id"] == channel_id), None)
-
-    if not channel_data:
-        release_tuner(locked_tuner['roku_ip'])
-        return "Channel not found.", 404
-
-    roku_ip = locked_tuner['roku_ip']
-
-    try:
-        base_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
-        content_id = channel_data['deep_link_content_id']
-        media_type = channel_data['media_type']
-
-        if '=' in content_id or '&' in content_id:
-            roku_tune_url = f"{base_url}?{content_id}&mediaType={media_type}"
-        else:
-            roku_tune_url = f"{base_url}?contentId={content_id}&mediaType={media_type}"
-        
-        if DEBUG_LOGGING_ENABLED:
-            logging.info(f"Constructed tune URL: {roku_tune_url}")
-
-        tune_future = executor.submit(tune_roku_async, roku_ip, roku_tune_url)
-
-        if not tune_future.result(timeout=5):
-            release_tuner(roku_ip)
-            return "Failed to tune Roku", 500
-
-        tune_delay = channel_data.get("tune_delay", 3)
-
-        if channel_data.get('needs_select_keypress'):
-            def delayed_commands():
-                time.sleep(tune_delay)
-                send_additional_commands(roku_ip, channel_data)
-            executor.submit(delayed_commands)
-        
-        time.sleep(tune_delay)
-
-        if DEBUG_LOGGING_ENABLED:
-            total_time = time.time() - start_time
-            logging.info(f"Total tuning time for {channel_id}: {total_time:.2f} seconds")
-
-    except Exception as e:
-        release_tuner(roku_ip)
-        return f"Failed to tune Roku: {e}", 500
-
-    # Determine the encoding mode for this specific tuner, falling back to the global setting.
-    tuner_encoding_mode = locked_tuner.get('encoding_mode', ENCODING_MODE)
-
-    if DEBUG_LOGGING_ENABLED:
-        logging.info(f"Using '{tuner_encoding_mode}' mode for tuner {roku_ip}")
-
-    if tuner_encoding_mode == 'reencode':
-        stream_generator = reencode_stream_generator(locked_tuner['encoder_url'], roku_ip)
-    elif tuner_encoding_mode == 'remux':
-        stream_generator = remux_stream_generator(locked_tuner['encoder_url'], roku_ip)
-    else: # Defaults to 'proxy'
-        stream_generator = proxy_stream_generator(locked_tuner['encoder_url'], roku_ip)
-
-    return Response(stream_with_context(stream_generator), mimetype='video/mpeg')
-
-@app.route('/upload_config', methods=['POST'])
-def upload_config():
-    if 'file' not in request.files: return "No file part", 400
-    file = request.files['file']
-    if file.filename == '' or not file.filename.endswith('.json'): return "Invalid file", 400
-    try:
-        file.save(CONFIG_FILE_PATH)
-        load_config()
-
-        # --- MODIFIED SECTION ---
-        # Gracefully restart the Gunicorn worker to apply the new config.
-        # This tells the master process to restart this worker.
-        try:
-            master_pid = os.getppid()
-            logging.info(f"Configuration updated. Sending SIGHUP to master process (PID: {master_pid}) to reload worker.")
-            os.kill(master_pid, signal.SIGHUP)
-        except Exception as e:
-            logging.error(f"Could not signal Gunicorn to reload: {e}")
-        # --- END OF MODIFIED SECTION ---
-
-        return "Configuration updated successfully. Server is reloading...", 200
-    except Exception as e:
-        return f"Error processing config file: {e}", 400
-
-@app.route('/')
-def index():
-    return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a>"
-
-# --- Remote Control Routes ---
-
-@app.route('/remote')
-def remote_control():
-    return render_template('remote.html')
-
-@app.route('/remote/devices')
-def get_remote_devices():
-    remote_devices = [{"name": tuner.get("name", tuner["roku_ip"]), "roku_ip": tuner["roku_ip"]} for tuner in TUNERS]
-    return jsonify(remote_devices)
-
-@app.route('/remote/keypress/<device_ip>/<key>', methods=['POST'])
-def remote_keypress(device_ip, key):
-    if not any(tuner['roku_ip'] == device_ip for tuner in TUNERS):
-        return jsonify({"status": "error", "message": "Device not found."}), 404
-    try:
-        # CORRECTED: The key is now properly encoded before being sent to the Roku device.
-        # Flask decodes the URL from the browser, so we must re-encode it for the Roku.
-        safe_key = urllib.parse.quote(key)
-        roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
-        return jsonify({"status": "success"})
-    except requests.exceptions.RequestException as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# --- Status Page & Config API Routes ---
-
-@app.route('/status')
-def status_page():
-    """Renders the main status and configuration page."""
-    global_settings = {
-        'encoding_mode': ENCODING_MODE,
-        'audio_bitrate': AUDIO_BITRATE,
-        'audio_channels': os.getenv('AUDIO_CHANNELS', '2'),
-        'debug_logging': DEBUG_LOGGING_ENABLED
-    }
-    return render_template('status.html', global_settings=global_settings)
-
-@app.route('/api/config', methods=['GET'])
-def get_config():
-    """Returns the current JSON configuration from the file."""
-    try:
-        with open(CONFIG_FILE_PATH, 'r') as f:
-            config_data = json.load(f)
-        return jsonify(config_data)
-    except FileNotFoundError:
-        return jsonify({"tuners": [], "channels": [], "epg_channels": []})
-    except Exception as e:
-        logging.error(f"Error reading config file for API: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/config', methods=['POST'])
-def update_config():
-    """Receives a full JSON config, saves it, and reloads the server."""
-    try:
-        new_config = request.get_json()
-        if not all(k in new_config for k in ['tuners', 'channels', 'epg_channels']):
-            return jsonify({"error": "Invalid configuration structure."}), 400
-
-        with open(CONFIG_FILE_PATH, 'w') as f:
-            json.dump(new_config, f, indent=2)
-
-        load_config()
-
-        try:
-            master_pid = os.getppid()
-            logging.info(f"Config updated via API. Sending SIGHUP to master process (PID: {master_pid}) to reload worker.")
-            os.kill(master_pid, signal.SIGHUP)
-        except Exception as e:
-            logging.error(f"Could not signal Gunicorn to reload: {e}")
-
-        return jsonify({"message": "Configuration saved successfully. Server is reloading."}), 200
-    except Exception as e:
-        logging.error(f"Error saving config file via API: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/status')
-def api_status():
-    statuses = []
-
-    def check_tuner_status(tuner):
-        roku_ip = tuner['roku_ip']
-        encoder_url = tuner['encoder_url']
-
-        try:
-            roku_session.get(f"http://{roku_ip}:8060", timeout=2)
-            roku_status = 'online'
-        except requests.exceptions.RequestException:
-            roku_status = 'offline'
-
-        try:
-            response = requests.head(encoder_url, timeout=2, allow_redirects=True)
-            response.raise_for_status()
-            encoder_status = 'online'
-        except requests.exceptions.RequestException:
-            try:
-                response = requests.get(encoder_url, timeout=2, stream=True)
-                response.raise_for_status()
-                encoder_status = 'online'
-            except requests.exceptions.RequestException:
-                encoder_status = 'offline'
-
-        return {
-            "name": tuner.get("name", roku_ip),
-            "roku_ip": roku_ip,
-            "encoder_url": encoder_url,
-            "roku_status": roku_status,
-            "encoder_status": encoder_status
+        async function loadDevices() {
+            try {
+                const response = await fetch('/remote/devices');
+                const devices = await response.json();
+                deviceSelect.innerHTML = '<option value="">Select a Roku Device</option>';
+                devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.roku_ip;
+                    option.textContent = device.name;
+                    deviceSelect.appendChild(option);
+                });
+                const lastSelected = localStorage.getItem('lastSelectedRokuRemoteIp');
+                if(lastSelected && deviceSelect.querySelector(`option[value="${lastSelected}"]`)) {
+                    deviceSelect.value = lastSelected;
+                    selectDevice();
+                }
+            } catch (error) {
+                console.error('Failed to load devices:', error);
+                showNotification('Error loading devices.');
+            }
         }
 
-    with ThreadPoolExecutor(max_workers=len(TUNERS) or 1) as status_executor:
-        status_futures = [status_executor.submit(check_tuner_status, tuner) for tuner in TUNERS]
-        statuses = [future.result() for future in status_futures]
+        function selectDevice() {
+            selectedDeviceIp = deviceSelect.value;
+            if (selectedDeviceIp) {
+                localStorage.setItem('lastSelectedRokuRemoteIp', selectedDeviceIp);
+                showNotification(`Controlling: ${deviceSelect.options[deviceSelect.selectedIndex].text}`);
+            } else {
+                 localStorage.removeItem('lastSelectedRokuRemoteIp');
+            }
+        }
 
-    tuner_configs = [{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"], "encoder_url": t["encoder_url"]} for t in TUNERS]
+        async function sendKey(key) {
+            if (!selectedDeviceIp) {
+                showNotification('Please select a device first.');
+                return;
+            }
+            try {
+                const encodedKey = encodeURIComponent(key);
+                const response = await fetch(`/remote/keypress/${selectedDeviceIp}/${encodedKey}`, { method: 'POST' });
+                const result = await response.json();
+                if (result.status !== 'success') {
+                    showNotification(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                console.error(`Failed to send key ${key}:`, error);
+                showNotification('Failed to send command.');
+            }
+        }
+        
+        async function sendText() {
+            const textInput = document.getElementById('keyboard-input');
+            const text = textInput.value;
+            if (!text) return;
+            if (!selectedDeviceIp) {
+                showNotification('Please select a device first.');
+                return;
+            }
+            
+            for (const char of text) {
+                await sendKey(`Lit_${char}`);
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+            }
+            
+            textInput.value = '';
+        }
 
-    return jsonify({"tuners": tuner_configs, "statuses": statuses})
+        // --- New Modal and Reboot Functions ---
+        const rebootModal = document.getElementById('reboot-modal');
 
-# --- App Initialization ---
-if __name__ != '__main__':
-    load_config()
-    ENCODER_SETTINGS = get_encoder_options()
+        function openRebootModal() {
+            rebootModal.style.display = 'flex';
+        }
+
+        function closeRebootModal() {
+            rebootModal.style.display = 'none';
+        }
+
+        function rebootDevice() {
+            if (!selectedDeviceIp) {
+                showNotification('Please select a device first.');
+                return;
+            }
+            openRebootModal();
+        }
+
+        async function confirmReboot() {
+            try {
+                const response = await fetch(`/remote/reboot/${selectedDeviceIp}`, { method: 'POST' });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showNotification('Reboot command sent!');
+                } else {
+                    showNotification(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('Failed to send reboot command:', error);
+                showNotification('Failed to send reboot command.');
+            } finally {
+                closeRebootModal();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadDevices);
+        window.onclick = function(event) {
+            if (event.target == rebootModal) {
+                closeRebootModal();
+            }
+        }
+    </script>
+</body>
+</html>
