@@ -6,10 +6,20 @@
     <title>Roku Remote</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
+        :root {
+            --bg-color: #2c2c2c;
+            --surface-color: #3a3a3a;
+            --primary-color: #7dd3fc;
+            --text-color: #e0e0e0;
+            --border-color: #4a4a4a;
+            --button-color: #007bff;
+            --button-hover-color: #0056b3;
+            --error-color: #dc3545;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #2c2c2c;
-            color: #e0e0e0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -18,7 +28,7 @@
             -webkit-tap-highlight-color: transparent;
         }
         .remote-container {
-            background-color: #3a3a3a;
+            background-color: var(--surface-color);
             border-radius: 20px;
             padding: 25px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.4);
@@ -28,7 +38,7 @@
         }
         h1 {
             text-align: center;
-            color: #7dd3fc;
+            color: var(--primary-color);
             margin-top: 0;
             margin-bottom: 20px;
             font-size: 1.5em;
@@ -41,8 +51,8 @@
             padding: 12px;
             border-radius: 12px;
             border: 1px solid #555;
-            background-color: #4a4a4a;
-            color: #e0e0e0;
+            background-color: var(--border-color);
+            color: var(--text-color);
             font-size: 1em;
             -webkit-appearance: none;
             -moz-appearance: none;
@@ -61,25 +71,23 @@
             padding: 12px;
             border-radius: 12px;
             border: 1px solid #555;
-            background-color: #4a4a4a;
-            color: #e0e0e0;
+            background-color: var(--border-color);
+            color: var(--text-color);
             font-size: 1em;
-            /* Added to prevent the input from growing too large */
             min-width: 0;
         }
         .keyboard-section button {
-             /* CORRECTED: Adjusted padding to be more responsive */
             padding: 12px;
             border-radius: 12px;
             border: none;
-            background-color: #007bff;
+            background-color: var(--button-color);
             color: white;
             font-size: 1em;
             cursor: pointer;
             transition: background-color 0.2s;
         }
         .keyboard-section button:hover {
-            background-color: #0056b3;
+            background-color: var(--button-hover-color);
         }
         .grid-container {
             display: grid;
@@ -115,12 +123,19 @@
             background-color: #777;
             transform: scale(0.95);
         }
+        /* --- Style for Red Power Button --- */
+        #button-reboot {
+            background-color: var(--error-color);
+        }
+        #button-reboot:hover {
+            background-color: #c82333; /* A darker red for hover */
+        }
         .d-pad .remote-button {
             border-radius: 15px;
         }
         #button-up { grid-area: 1 / 2 / 2 / 3; }
         #button-left { grid-area: 2 / 1 / 3 / 2; }
-        #button-ok { grid-area: 2 / 2 / 3 / 3; background-color: #7dd3fc; color: #2c2c2c; font-weight: bold; font-size: 1.2em; }
+        #button-ok { grid-area: 2 / 2 / 3 / 3; background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; font-size: 1.2em; }
         #button-right { grid-area: 2 / 3 / 3 / 4; }
         #button-down { grid-area: 3 / 2 / 4 / 3; }
 
@@ -133,13 +148,42 @@
             color: white;
             padding: 10px 20px;
             border-radius: 8px;
-            z-index: 1000;
+            z-index: 1001;
             opacity: 0;
             transition: opacity 0.5s;
         }
         .notification.show {
             opacity: 1;
         }
+        
+        /* --- Modal Styles --- */
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
+            overflow: auto; background-color: rgba(0,0,0,0.6);
+            align-items: center; justify-content: center;
+        }
+        .modal-content {
+            background-color: var(--surface-color); padding: 25px; border-radius: 12px;
+            width: 90%; max-width: 400px; box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        .modal-header { 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding-bottom: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color);
+        }
+        .modal-header h3 { margin: 0; color: var(--primary-color); font-size: 1.2em; }
+        .close-button { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .modal-body p { margin-top: 0; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px; }
+        .modal-button {
+            padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer;
+            font-size: 1em; transition: background-color 0.2s;
+        }
+        .modal-button.cancel { background-color: #6c757d; color: white; }
+        .modal-button.confirm { background-color: var(--error-color); color: white; }
+        .modal-button.cancel:hover { background-color: #5a6268; }
+        .modal-button.confirm:hover { background-color: #c82333; }
+
     </style>
 </head>
 <body>
@@ -160,7 +204,7 @@
             <div class="button-row">
                 <button class="remote-button" id="button-back" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
                 <button class="remote-button" id="button-home" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
-                <button class="remote-button" id="button-info" onclick="sendKey('Info')"><i class="fa-solid fa-info-circle"></i></button>
+                <button class="remote-button" id="button-reboot" onclick="rebootDevice()"><i class="fa-solid fa-power-off"></i></button>
             </div>
             <div class="d-pad">
                 <button class="remote-button" id="button-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
@@ -177,6 +221,22 @@
         </div>
     </div>
     <div id="notification-area"></div>
+
+    <div id="reboot-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirm Reboot</h3>
+                <span class="close-button" onclick="closeRebootModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to reboot this Roku device?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-button cancel" onclick="closeRebootModal()">Cancel</button>
+                <button class="modal-button confirm" onclick="confirmReboot()">Reboot</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         const deviceSelect = document.getElementById('device-select');
@@ -252,9 +312,7 @@
         async function sendText() {
             const textInput = document.getElementById('keyboard-input');
             const text = textInput.value;
-            if (!text) {
-                return;
-            }
+            if (!text) return;
             if (!selectedDeviceIp) {
                 showNotification('Please select a device first.');
                 return;
@@ -268,7 +326,48 @@
             textInput.value = '';
         }
 
+        // --- Modal and Reboot Functions ---
+        const rebootModal = document.getElementById('reboot-modal');
+
+        function openRebootModal() {
+            rebootModal.style.display = 'flex';
+        }
+
+        function closeRebootModal() {
+            rebootModal.style.display = 'none';
+        }
+
+        function rebootDevice() {
+            if (!selectedDeviceIp) {
+                showNotification('Please select a device first.');
+                return;
+            }
+            openRebootModal();
+        }
+
+        async function confirmReboot() {
+            try {
+                const response = await fetch(`/remote/reboot/${selectedDeviceIp}`, { method: 'POST' });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showNotification('Reboot command sent!');
+                } else {
+                    showNotification(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('Failed to send reboot command:', error);
+                showNotification('Failed to send reboot command.');
+            } finally {
+                closeRebootModal();
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', loadDevices);
+        window.onclick = function(event) {
+            if (event.target == rebootModal) {
+                closeRebootModal();
+            }
+        }
     </script>
 </body>
 </html>
