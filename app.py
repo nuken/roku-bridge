@@ -399,11 +399,56 @@ def remote_keypress(device_ip, key):
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- Status Page Routes ---
+# --- Status Page & Config API Routes ---
 
 @app.route('/status')
 def status_page():
-    return render_template('status.html')
+    """Renders the main status and configuration page."""
+    global_settings = {
+        'encoding_mode': ENCODING_MODE,
+        'audio_bitrate': AUDIO_BITRATE,
+        'audio_channels': os.getenv('AUDIO_CHANNELS', '2'),
+        'debug_logging': DEBUG_LOGGING_ENABLED
+    }
+    return render_template('status.html', global_settings=global_settings)
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Returns the current JSON configuration from the file."""
+    try:
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            config_data = json.load(f)
+        return jsonify(config_data)
+    except FileNotFoundError:
+        return jsonify({"tuners": [], "channels": [], "epg_channels": []})
+    except Exception as e:
+        logging.error(f"Error reading config file for API: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """Receives a full JSON config, saves it, and reloads the server."""
+    try:
+        new_config = request.get_json()
+        if not all(k in new_config for k in ['tuners', 'channels', 'epg_channels']):
+            return jsonify({"error": "Invalid configuration structure."}), 400
+
+        with open(CONFIG_FILE_PATH, 'w') as f:
+            json.dump(new_config, f, indent=2)
+
+        load_config()
+
+        try:
+            master_pid = os.getppid()
+            logging.info(f"Config updated via API. Sending SIGHUP to master process (PID: {master_pid}) to reload worker.")
+            os.kill(master_pid, signal.SIGHUP)
+        except Exception as e:
+            logging.error(f"Could not signal Gunicorn to reload: {e}")
+
+        return jsonify({"message": "Configuration saved successfully. Server is reloading."}), 200
+    except Exception as e:
+        logging.error(f"Error saving config file via API: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status')
 def api_status():
