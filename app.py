@@ -147,14 +147,13 @@ def tune_roku_async(roku_ip, tune_url):
         return False
 
 def send_additional_commands(roku_ip, channel_data):
-    """Send additional commands (Select) after tuning delay."""
+    """Sends the 'Select' command to the Roku."""
     try:
         if channel_data.get('needs_select_keypress'):
             select_url = f"http://{roku_ip}:8060/keypress/Select"
             roku_session.post(select_url)
             if DEBUG_LOGGING_ENABLED:
                 logging.info(f"Sent Select keypress to {roku_ip}")
-            time.sleep(0.5)
 
     except requests.exceptions.RequestException as e:
         if DEBUG_LOGGING_ENABLED:
@@ -314,19 +313,22 @@ def stream_channel(channel_id):
             release_tuner(roku_ip)
             return "Failed to tune Roku", 500
 
+        # Get the tune delay for the app to load, defaulting to 3 seconds.
         tune_delay = channel_data.get("tune_delay", 3)
-
-        if channel_data.get('needs_select_keypress'):
-            def delayed_commands():
-                time.sleep(tune_delay)
-                send_additional_commands(roku_ip, channel_data)
-            executor.submit(delayed_commands)
-        
+        if DEBUG_LOGGING_ENABLED:
+            logging.info(f"Waiting {tune_delay} seconds for app to load...")
         time.sleep(tune_delay)
+
+        # If a 'Select' press is needed, wait an additional second before sending it.
+        if channel_data.get('needs_select_keypress'):
+            if DEBUG_LOGGING_ENABLED:
+                logging.info(f"Channel requires 'Select' press. Waiting an additional 1 second.")
+            time.sleep(1) # Add a 1-second delay before the keypress
+            send_additional_commands(roku_ip, channel_data) # This function just sends the keypress
 
         if DEBUG_LOGGING_ENABLED:
             total_time = time.time() - start_time
-            logging.info(f"Total tuning time for {channel_id}: {total_time:.2f} seconds")
+            logging.info(f"Total tuning time for {channel_id}: {total_time:.2f} seconds. Starting stream.")
 
     except Exception as e:
         release_tuner(roku_ip)
