@@ -161,6 +161,8 @@
             width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555;
             background-color: var(--border-color); color: var(--text-color); font-size: 1em; box-sizing: border-box;
         }
+        .form-group-checkbox { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+        .form-group-checkbox input { width: auto; }
         #save-all-button {
             background-color: var(--success-color);
             width: 100%;
@@ -388,6 +390,10 @@
                         </select>
                     </div>
                     <div class="form-group"><label for="gracenote-tune-delay">Tune Delay (seconds, optional)</label><input type="number" id="gracenote-tune-delay" placeholder="Default: 3"></div>
+                    <div class="form-group-checkbox">
+                        <input type="checkbox" id="gracenote-needs-select">
+                        <label for="gracenote-needs-select">Needs "Select" Keypress After Tune</label>
+                    </div>
                     <button type="submit" class="button">Save Channel</button>
                 </form>
             </div>
@@ -417,6 +423,10 @@
                             <option value="episode">episode</option>
                             <option value="series">series</option>
                         </select>
+                    </div>
+                    <div class="form-group-checkbox">
+                        <input type="checkbox" id="epg-needs-select">
+                        <label for="epg-needs-select">Needs "Select" Keypress After Tune</label>
                     </div>
                     <hr style="border-color: var(--border-color); margin: 20px 0;">
                     <h4>Optional Fields</h4>
@@ -594,6 +604,7 @@
                     document.getElementById('gracenote-station-id').value = channel.tvc_guide_stationid || '';
                     document.getElementById('gracenote-media-type').value = channel.media_type || 'live';
                     document.getElementById('gracenote-tune-delay').value = channel.tune_delay || '';
+                    document.getElementById('gracenote-needs-select').checked = channel.needs_select_keypress || false;
                 }
                 openModal('gracenote-channel-modal');
             } else if (type === 'epg') {
@@ -612,6 +623,7 @@
                     document.getElementById('epg-roku-app-id').value = channel.roku_app_id || '';
                     document.getElementById('epg-deep-link-content-id').value = channel.deep_link_content_id || '';
                     document.getElementById('epg-media-type').value = channel.media_type || 'live';
+                    document.getElementById('epg-needs-select').checked = channel.needs_select_keypress || false;
 
                     for (const key of epgOptionalFields) {
                         if (key in channel) {
@@ -633,11 +645,13 @@
                 deep_link_content_id: document.getElementById('gracenote-deep-link-content-id').value,
                 tvc_guide_stationid: document.getElementById('gracenote-station-id').value,
                 media_type: document.getElementById('gracenote-media-type').value,
+                needs_select_keypress: document.getElementById('gracenote-needs-select').checked
             };
             const tuneDelay = document.getElementById('gracenote-tune-delay').value;
             if (tuneDelay) {
                 channelData.tune_delay = parseInt(tuneDelay, 10);
             }
+            if (!channelData.needs_select_keypress) delete channelData.needs_select_keypress;
 
             if (index) {
                 appConfig.channels[parseInt(index, 10)] = channelData;
@@ -658,6 +672,7 @@
                 roku_app_id: document.getElementById('epg-roku-app-id').value,
                 deep_link_content_id: document.getElementById('epg-deep-link-content-id').value,
                 media_type: document.getElementById('epg-media-type').value,
+                needs_select_keypress: document.getElementById('epg-needs-select').checked
             };
 
             document.querySelectorAll('#dynamic-fields-container .dynamic-field').forEach(fieldDiv => {
@@ -668,6 +683,8 @@
                     channelData[key] = value;
                 }
             });
+            
+            if (!channelData.needs_select_keypress) delete channelData.needs_select_keypress;
 
             if (index) {
                 appConfig.epg_channels[parseInt(index, 10)] = channelData;
