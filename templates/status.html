@@ -98,8 +98,8 @@
             text-align: left;
             border-bottom: 1px solid var(--border-color);
         }
-        th { 
-            background-color: var(--border-color); 
+        th {
+            background-color: var(--border-color);
             position: sticky; /* Make headers stick during scroll */
             top: 0;
             z-index: 1;
@@ -157,7 +157,7 @@
         .close-button { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; }
-        .form-group input, .form-group select {
+        .form-group input, .form-group select, .form-group textarea {
             width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555;
             background-color: var(--border-color); color: var(--text-color); font-size: 1em; box-sizing: border-box;
         }
@@ -188,7 +188,7 @@
         }
         .dynamic-field { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
         .dynamic-field .form-group { flex-grow: 1; margin-bottom: 0; }
-        
+
         /* --- Full Width Toggle Styles --- */
         .view-toggle {
             display: flex;
@@ -243,8 +243,7 @@
                 </label>
             </div>
         </h1>
-        
-        <!-- Status Section -->
+
         <button class="button" onclick="fetchStatus()"><i class="fa-solid fa-sync"></i> Refresh Status</button>
         <div class="table-wrapper">
             <table id="status-table">
@@ -260,7 +259,6 @@
             </table>
         </div>
 
-        <!-- Global Settings Section -->
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
              <h2><i class="fa-solid fa-globe"></i> Global Settings</h2>
         </div>
@@ -272,7 +270,6 @@
             <p><strong>Debug Logging:</strong> <code>{{ 'Enabled' if global_settings.debug_logging else 'Disabled' }}</code></p>
         </div>
 
-        <!-- Tuners Section -->
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
             <h2><i class="fa-solid fa-satellite-dish"></i> Tuners</h2>
         </div>
@@ -284,7 +281,6 @@
         </div>
         <button class="button" onclick="openTunerModal()"><i class="fa-solid fa-plus"></i> Add Tuner</button>
 
-        <!-- Channels Section -->
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
             <h2><i class="fa-solid fa-tv"></i> Gracenote Channels</h2>
             <span class="m3u-url">
@@ -300,7 +296,6 @@
         </div>
         <button class="button" onclick="openChannelModal('gracenote')"><i class="fa-solid fa-plus"></i> Add Gracenote Channel</button>
 
-        <!-- EPG Channels Section -->
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
             <h2><i class="fa-solid fa-list-alt"></i> Custom EPG Channels</h2>
              <span class="m3u-url">
@@ -317,8 +312,7 @@
         <button class="button" onclick="openChannelModal('epg')"><i class="fa-solid fa-plus"></i> Add EPG Channel</button>
 
         <button id="save-all-button" class="button" onclick="saveAllChanges()"><i class="fa-solid fa-save"></i> Save All Changes</button>
-        
-        <!-- Backup & Restore Section -->
+
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
             <h2><i class="fa-solid fa-file-import"></i> Backup & Restore</h2>
         </div>
@@ -336,7 +330,6 @@
         </div>
     </div>
 
-    <!-- Tuner Modal -->
     <div id="tuner-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -364,8 +357,7 @@
             </div>
         </div>
     </div>
-    
-    <!-- Gracenote Channel Modal -->
+
     <div id="gracenote-channel-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -378,7 +370,11 @@
                     <div class="form-group"><label for="gracenote-name">Name</label><input type="text" id="gracenote-name" required></div>
                     <div class="form-group"><label for="gracenote-id">ID</label><input type="text" id="gracenote-id" required></div>
                     <div class="form-group"><label for="gracenote-roku-app-id">Roku App ID</label><input type="text" id="gracenote-roku-app-id" required></div>
-                    <div class="form-group"><label for="gracenote-deep-link-content-id">Deep Link Content ID</label><input type="text" id="gracenote-deep-link-content-id" required></div>
+                    <div class="form-group"><label for="gracenote-deep-link-content-id">Deep Link Content ID</label><input type="text" id="gracenote-deep-link-content-id"></div>
+                    <div class="form-group">
+                        <label for="gracenote-key-sequence">Key Sequence (Optional, comma-separated)</label>
+                        <textarea id="gracenote-key-sequence" rows="3" placeholder="Example: Down,wait=2,Select,Right"></textarea>
+                    </div>
                     <div class="form-group"><label for="gracenote-station-id">Gracenote Station ID</label><input type="text" id="gracenote-station-id" required></div>
                     <div class="form-group">
                         <label for="gracenote-media-type">Media Type</label>
@@ -400,7 +396,6 @@
         </div>
     </div>
 
-    <!-- EPG Channel Modal -->
     <div id="epg-channel-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -414,7 +409,11 @@
                     <div class="form-group"><label for="epg-name">Name</label><input type="text" id="epg-name" required></div>
                     <div class="form-group"><label for="epg-id">ID</label><input type="text" id="epg-id" required></div>
                     <div class="form-group"><label for="epg-roku-app-id">Roku App ID</label><input type="text" id="epg-roku-app-id" required></div>
-                    <div class="form-group"><label for="epg-deep-link-content-id">Deep Link Content ID</label><input type="text" id="epg-deep-link-content-id" required></div>
+                    <div class="form-group"><label for="epg-deep-link-content-id">Deep Link Content ID (Optional)</label><input type="text" id="epg-deep-link-content-id"></div>
+                     <div class="form-group">
+                        <label for="epg-key-sequence">Key Sequence (Optional, comma-separated)</label>
+                        <textarea id="epg-key-sequence" rows="3" placeholder="Example: Down,wait=2,Select,Right"></textarea>
+                    </div>
                     <div class="form-group">
                         <label for="epg-media-type">Media Type</label>
                         <select id="epg-media-type">
@@ -566,7 +565,7 @@
             }
             openModal('tuner-modal');
         }
-        
+
         document.getElementById('tuner-form').addEventListener('submit', function(e) {
             e.preventDefault();
             const index = document.getElementById('tuner-index').value;
@@ -601,6 +600,7 @@
                     document.getElementById('gracenote-id').value = channel.id || '';
                     document.getElementById('gracenote-roku-app-id').value = channel.roku_app_id || '';
                     document.getElementById('gracenote-deep-link-content-id').value = channel.deep_link_content_id || '';
+                    document.getElementById('gracenote-key-sequence').value = (channel.key_sequence || []).join(',');
                     document.getElementById('gracenote-station-id').value = channel.tvc_guide_stationid || '';
                     document.getElementById('gracenote-media-type').value = channel.media_type || 'live';
                     document.getElementById('gracenote-tune-delay').value = channel.tune_delay || '';
@@ -615,13 +615,14 @@
                 document.getElementById('epg-channel-index').value = index !== null ? index : '';
 
                 populateOptionalFieldsDropdown();
-                
+
                 if (index !== null) {
                     const channel = appConfig.epg_channels[index];
                     document.getElementById('epg-name').value = channel.name || '';
                     document.getElementById('epg-id').value = channel.id || '';
                     document.getElementById('epg-roku-app-id').value = channel.roku_app_id || '';
                     document.getElementById('epg-deep-link-content-id').value = channel.deep_link_content_id || '';
+                    document.getElementById('epg-key-sequence').value = (channel.key_sequence || []).join(',');
                     document.getElementById('epg-media-type').value = channel.media_type || 'live';
                     document.getElementById('epg-needs-select').checked = channel.needs_select_keypress || false;
 
@@ -648,10 +649,16 @@
                 needs_select_keypress: document.getElementById('gracenote-needs-select').checked
             };
             const tuneDelay = document.getElementById('gracenote-tune-delay').value;
-            if (tuneDelay) {
-                channelData.tune_delay = parseInt(tuneDelay, 10);
-            }
+            if (tuneDelay) channelData.tune_delay = parseInt(tuneDelay, 10);
+
+            const keySequence = document.getElementById('gracenote-key-sequence').value;
+            if (keySequence) channelData.key_sequence = keySequence.split(',').map(k => k.trim());
+
+
             if (!channelData.needs_select_keypress) delete channelData.needs_select_keypress;
+            if (!channelData.deep_link_content_id) delete channelData.deep_link_content_id;
+            if (!channelData.key_sequence || channelData.key_sequence.length === 0) delete channelData.key_sequence;
+
 
             if (index) {
                 appConfig.channels[parseInt(index, 10)] = channelData;
@@ -675,6 +682,9 @@
                 needs_select_keypress: document.getElementById('epg-needs-select').checked
             };
 
+            const keySequence = document.getElementById('epg-key-sequence').value;
+            if (keySequence) channelData.key_sequence = keySequence.split(',').map(k => k.trim());
+
             document.querySelectorAll('#dynamic-fields-container .dynamic-field').forEach(fieldDiv => {
                 const input = fieldDiv.querySelector('input');
                 const key = input.dataset.key;
@@ -683,8 +693,11 @@
                     channelData[key] = value;
                 }
             });
-            
+
             if (!channelData.needs_select_keypress) delete channelData.needs_select_keypress;
+            if (!channelData.deep_link_content_id) delete channelData.deep_link_content_id;
+            if (!channelData.key_sequence || channelData.key_sequence.length === 0) delete channelData.key_sequence;
+
 
             if (index) {
                 appConfig.epg_channels[parseInt(index, 10)] = channelData;
@@ -718,7 +731,7 @@
             const container = document.getElementById('dynamic-fields-container');
             const newFieldDiv = document.createElement('div');
             newFieldDiv.className = 'dynamic-field';
-            
+
             const isNumber = fieldToAdd === 'tune_delay';
 
             newFieldDiv.innerHTML = `
@@ -740,7 +753,7 @@
         document.getElementById('upload-form').addEventListener('submit', async function(event) {
             event.preventDefault();
             const formData = new FormData(this);
-            
+
             try {
                 const response = await fetch('/upload_config', {
                     method: 'POST',
@@ -803,7 +816,7 @@
                 statusTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--error-color);">Failed to load status.</td></tr>';
             }
         }
-        
+
         function showNotification(message, type = 'success') {
             const notification = document.createElement('div');
             notification.className = `notification`;
@@ -822,7 +835,7 @@
             const isFullScreen = localStorage.getItem('rokuBridgeFullScreen') === 'true';
             const container = document.querySelector('.container');
             const toggle = document.getElementById('fullscreen-toggle');
-            
+
             if (isFullScreen) {
                 container.classList.add('full-width');
                 toggle.checked = true;
