@@ -146,6 +146,49 @@ def tune_roku_async(roku_ip, tune_url):
         logging.error(f"Failed to tune Roku at {roku_ip}: {e}")
         return False
 
+def send_key_sequence(device_ip, keys, is_reboot=False):
+    """Sends a sequence of keypresses to a device with configurable delays."""
+    first_key_delay = 1.0 if is_reboot else 0.5
+    subsequent_key_delay = 0.3
+
+    is_first_key = True
+    for key in keys:
+        try:
+            # --- MODIFIED SECTION for variable wait command ---
+            if key.lower().startswith('wait'):
+                wait_duration = 1.0 # Default wait time
+                parts = key.split('=')
+                if len(parts) > 1:
+                    try:
+                        wait_duration = float(parts[1])
+                    except ValueError:
+                        logging.warning(f"Invalid wait duration '{parts[1]}'. Defaulting to 1 second.")
+
+                if DEBUG_LOGGING_ENABLED: logging.info(f"Executing {wait_duration}-second wait on {device_ip}")
+                time.sleep(wait_duration)
+                continue
+            # --- END OF MODIFIED SECTION ---
+
+            # For literal characters, format them correctly for the Roku ECP
+            if len(key) == 1:
+                safe_key = f"Lit_{urllib.parse.quote(key)}"
+            else:
+                safe_key = key
+
+            roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
+            if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
+
+            if is_first_key:
+                time.sleep(first_key_delay)
+                is_first_key = False
+            else:
+                time.sleep(subsequent_key_delay)
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Failed to send key '{key}' to {device_ip}: {e}")
+            return False
+    return True
+
+
 def send_additional_commands(roku_ip, channel_data):
     """Sends the 'Select' command to the Roku."""
     try:
@@ -260,12 +303,12 @@ def generate_m3u_from_channels(channel_list):
         for tag, key in tags_to_add.items():
             if key in channel:
                 extinf_line += f' {tag}="{channel[key]}"'
-        
+
         extinf_line += f',{channel["name"]}'
-        
+
         m3u_content.append(extinf_line)
         m3u_content.append(stream_url)
-        
+
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
 @app.route('/channels.m3u')
@@ -295,23 +338,15 @@ def stream_channel(channel_id):
     roku_ip = locked_tuner['roku_ip']
 
     try:
-        base_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
-        content_id = channel_data['deep_link_content_id']
-        media_type = channel_data['media_type']
+        key_sequence = channel_data.get('key_sequence')
 
-        if '=' in content_id or '&' in content_id:
-            roku_tune_url = f"{base_url}?{content_id}&mediaType={media_type}"
-        else:
-            roku_tune_url = f"{base_url}?contentId={content_id}&mediaType={media_type}"
-        
-        if DEBUG_LOGGING_ENABLED:
-            logging.info(f"Constructed tune URL: {roku_tune_url}")
+        # Launch the app first, regardless of tuning method
+        launch_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
+        launch_future = executor.submit(tune_roku_async, roku_ip, launch_url)
 
-        tune_future = executor.submit(tune_roku_async, roku_ip, roku_tune_url)
-
-        if not tune_future.result(timeout=5):
+        if not launch_future.result(timeout=5):
             release_tuner(roku_ip)
-            return "Failed to tune Roku", 500
+            return "Failed to launch Roku app", 500
 
         # Get the tune delay for the app to load, defaulting to 3 seconds.
         tune_delay = channel_data.get("tune_delay", 3)
@@ -319,12 +354,40 @@ def stream_channel(channel_id):
             logging.info(f"Waiting {tune_delay} seconds for app to load...")
         time.sleep(tune_delay)
 
+        if key_sequence and isinstance(key_sequence, list):
+            # Method 1: Key Sequence
+            if DEBUG_LOGGING_ENABLED:
+                logging.info(f"Executing key sequence for channel {channel_id}: {key_sequence}")
+            send_key_sequence(roku_ip, key_sequence)
+
+        else:
+            # Method 2: Deep Linking (Original Method)
+            content_id = channel_data.get('deep_link_content_id')
+            if content_id:
+                media_type = channel_data.get('media_type', 'live')
+                if '=' in content_id or '&' in content_id:
+                    roku_tune_url = f"{launch_url}?{content_id}&mediaType={media_type}"
+                else:
+                    roku_tune_url = f"{launch_url}?contentId={content_id}&mediaType={media_type}"
+
+                if DEBUG_LOGGING_ENABLED:
+                    logging.info(f"Constructed deep link URL: {roku_tune_url}")
+
+                # We re-POST the launch command with deep link parameters
+                tune_future = executor.submit(tune_roku_async, roku_ip, roku_tune_url)
+                if not tune_future.result(timeout=5):
+                    # Don't release tuner, just log a warning, as the app is already open.
+                    logging.warning(f"Failed to send deep link command to Roku for channel {channel_id}")
+            else:
+                 logging.warning(f"Channel {channel_id} has no deep_link_content_id or key_sequence. Stream may fail.")
+
+
         # If a 'Select' press is needed, wait an additional second before sending it.
         if channel_data.get('needs_select_keypress'):
             if DEBUG_LOGGING_ENABLED:
                 logging.info(f"Channel requires 'Select' press. Waiting an additional 1 second.")
             time.sleep(1) # Add a 1-second delay before the keypress
-            send_additional_commands(roku_ip, channel_data) # This function just sends the keypress
+            send_additional_commands(roku_ip, channel_data)
 
         if DEBUG_LOGGING_ENABLED:
             total_time = time.time() - start_time
@@ -358,16 +421,12 @@ def upload_config():
         file.save(CONFIG_FILE_PATH)
         load_config()
 
-        # --- MODIFIED SECTION ---
-        # Gracefully restart the Gunicorn worker to apply the new config.
-        # This tells the master process to restart this worker.
         try:
             master_pid = os.getppid()
             logging.info(f"Configuration updated. Sending SIGHUP to master process (PID: {master_pid}) to reload worker.")
             os.kill(master_pid, signal.SIGHUP)
         except Exception as e:
             logging.error(f"Could not signal Gunicorn to reload: {e}")
-        # --- END OF MODIFIED SECTION ---
 
         return "Configuration updated successfully. Server is reloading...", 200
     except Exception as e:
@@ -401,22 +460,6 @@ def remote_keypress(device_ip, key):
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def send_key_sequence(device_ip, keys):
-    """Sends a sequence of keypresses to a device with a special delay for the first key."""
-    is_first_key = True
-    for key in keys:
-        try:
-            roku_session.post(f"http://{device_ip}:8060/keypress/{key}")
-            if is_first_key:
-                time.sleep(1.0)  # Longer delay after the first 'Home' press
-                is_first_key = False
-            else:
-                time.sleep(0.3)  # Standard delay for subsequent presses
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Failed to send key '{key}' to {device_ip}: {e}")
-            return False
-    return True
-
 @app.route('/remote/reboot/<device_ip>', methods=['POST'])
 def remote_reboot(device_ip):
     if not any(tuner['roku_ip'] == device_ip for tuner in TUNERS):
@@ -435,8 +478,8 @@ def remote_reboot(device_ip):
     ]
 
     # Run the sequence in a background thread to avoid blocking
-    executor.submit(send_key_sequence, device_ip, reboot_sequence)
-    
+    executor.submit(send_key_sequence, device_ip, reboot_sequence, is_reboot=True)
+
     return jsonify({"status": "success", "message": "Reboot sequence initiated."})
 
 # --- Status Page & Config API Routes ---
