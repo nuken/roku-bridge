@@ -20,7 +20,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python requirements
-# Install build tools, then Python packages, then remove build tools to keep the image small
 COPY requirements.txt .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3-dev \
@@ -31,8 +30,9 @@ RUN apt-get update \
 # Create a mount point for persistent configuration
 RUN mkdir -p /app/config
 
-# Copy the application code and templates
+# Copy the application code, plugins, and templates
 COPY app.py .
+COPY plugins/ /app/plugins/
 COPY templates/ /app/templates/
 
 # Expose the port the app runs on
