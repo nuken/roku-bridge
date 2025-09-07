@@ -86,6 +86,16 @@
         
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-file-import"></i> Backup & Restore</h2></div>
         <div class="backup-restore"><button class="button" onclick="downloadConfig()"><i class="fa-solid fa-download"></i> Download Configuration</button><hr style="border-color: var(--border-color); margin: 20px 0;"><form id="upload-form" action="/upload_config" method="post" enctype="multipart/form-data"><input type="file" name="file" id="file-input" required><button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload</button></form></div>
+        
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-puzzle-piece"></i> Plugin Management</h2></div>
+        <div class="backup-restore">
+            <p>Upload a new plugin (`_plugin.py`) file. The server will restart to load the new plugin.</p>
+            <form id="upload-plugin-form" method="post" enctype="multipart/form-data">
+                <input type="file" name="file" id="plugin-file-input" required accept=".py">
+                <button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload Plugin</button>
+            </form>
+        </div>
+
         <div class="nav-links"><a href="/remote">Go to Remote</a></div>
     </div>
     <div id="tuner-modal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="tuner-modal-title">Edit Tuner</h3><span class="close-button" onclick="closeModal('tuner-modal')">&times;</span></div><div class="modal-body"><form id="tuner-form"><input type="hidden" id="tuner-index"><div class="form-group"><label for="tuner-name">Name</label><input type="text" id="tuner-name" required></div><div class="form-group"><label for="tuner-roku-ip">Roku IP</label><input type="text" id="tuner-roku-ip" required></div><div class="form-group"><label for="tuner-encoder-url">Encoder URL</label><input type="text" id="tuner-encoder-url" required></div><div class="form-group"><label for="tuner-priority">Priority</label><input type="number" id="tuner-priority" value="99"></div><div class="form-group"><label for="tuner-encoding-mode">Encoding Mode (Optional)</label><select id="tuner-encoding-mode"><option value="">Use Global Default</option><option value="proxy">Proxy</option><option value="remux">Remux</option><option value="reencode">Re-encode Audio</option></select></div><button type="submit" class="button">Save Tuner</button></form></div></div></div>
@@ -343,6 +353,19 @@
                 const msg = await response.text(); showNotification(msg, response.ok ? 'success' : 'error');
                 if (response.ok) setTimeout(() => window.location.reload(), 1500);
             } catch (error) { showNotification('Upload failed: ' + error.message, 'error'); }
+        });
+
+        document.getElementById('upload-plugin-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            try {
+                const response = await fetch('/upload_plugin', { method: 'POST', body: formData });
+                const msg = await response.text();
+                showNotification(msg, response.ok ? 'success' : 'error');
+                if (response.ok) setTimeout(() => window.location.reload(), 1500);
+            } catch (error) {
+                showNotification('Plugin upload failed: ' + error.message, 'error');
+            }
         });
 
         function deleteItem(key, index) { if (confirm('Are you sure?')) { appConfig[key].splice(index, 1); renderAllTables(); } }

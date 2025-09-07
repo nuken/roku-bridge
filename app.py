@@ -297,6 +297,35 @@ def upload_config():
     except Exception as e:
         return f"Error processing config file: {e}", 400
 
+@app.route('/upload_plugin', methods=['POST'])
+def upload_plugin():
+    if 'file' not in request.files:
+        return "No file part", 400
+    file = request.files['file']
+    if file.filename == '' or not file.filename.endswith('_plugin.py'):
+        return "Invalid file. Must be a '_plugin.py' file.", 400
+    
+    try:
+        # Determine the plugins directory
+        plugins_dir = os.path.join(os.path.dirname(__file__), 'plugins')
+        os.makedirs(plugins_dir, exist_ok=True) # Ensure it exists
+        save_path = os.path.join(plugins_dir, file.filename)
+        
+        # Prevent directory traversal attacks
+        if not os.path.normpath(save_path).startswith(os.path.abspath(plugins_dir)):
+             return "Invalid filename", 400
+
+        file.save(save_path)
+        logging.info(f"New plugin uploaded: {file.filename}")
+        
+        # Reload gunicorn to discover the new plugin
+        os.kill(os.getppid(), signal.SIGHUP)
+        
+        return "Plugin uploaded successfully. Server is reloading...", 200
+    except Exception as e:
+        logging.error(f"Error saving plugin: {e}")
+        return f"Error saving plugin file: {e}", 500
+
 @app.route('/')
 def index():
     return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a>"
