@@ -55,7 +55,7 @@ class FoxOnePlugin(BaseAppPlugin):
             # Here, we create a loop of "Down" keypresses.
             for _ in range(list_position - 1):
                 sequence.append("Down")
-                sequence.append({"wait": 0.7}) # Small delay between presses
+                sequence.append({"wait": 0.2}) # Small delay between presses
 
         # Finally, select the channel to play.
         sequence.append("Select")
@@ -63,3 +63,4 @@ class FoxOnePlugin(BaseAppPlugin):
 
 
         return sequence
+
