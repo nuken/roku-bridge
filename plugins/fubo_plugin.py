@@ -59,9 +59,10 @@ class FuboPlugin(BaseAppPlugin):
 
         # Finally, select the channel to play.
         sequence.append("Select")
-        sequence.append({"wait": 0.7})
+        sequence.append({"wait": 1})
         sequence.append("Select")
         # --- END OF CUSTOMIZABLE NAVIGATION ---
 
 
         return sequence
+
