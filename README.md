@@ -1,5 +1,7 @@
 # **Roku Channels Bridge**
 
+[**Official Configuration Guide**](https://tuner.ct.ws)
+
 **Release: Beta 3.0**
 
 This project provides a Dockerized bridge that integrates your Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and uses this script to manage channel changes and proxy the video stream.
@@ -16,6 +18,7 @@ This setup allows you to use streaming service channels (like those from YouTube
   * **Remote Control:** A web-based **Remote** to control any of your configured Roku devices from a browser on your phone, tablet, or computer.
   * **Flexible Streaming Modes:** Choose between `proxy`, `remux`, or an efficient audio-only `reencode` mode to ensure stream stability with minimal CPU usage. This can be set per-tuner.
   * **Hardware Acceleration:** Automatically detects and uses NVIDIA (NVENC) or Intel (QSV) GPUs for video processing if available.
+  * **Persistent Configuration:** Uses a Docker volume to safely store your configuration, so it persists through container updates and restarts.
 
 ## **Installation**
 
@@ -104,6 +107,15 @@ For even more complex tuning logic, you can use app-specific Python plugins. A p
   * **`plugin_data`**: A field for providing custom data to your plugin, such as a channel's position in a guide list.
 
 To add a new plugin, simply create a new `_plugin.py` file in your `config/plugins` directory. The application will automatically detect and load it.
+
+#### **Fubo Plugin (`fubo_plugin.py`)**
+
+The Fubo plugin is designed to navigate the guide and select a channel based on its position in the list.
+
+  * **Recommendation:** For the best performance, favorite the channels you want to use within the Fubo app itself. This will place them at the top of the guide, significantly reducing the time and keypresses needed for the plugin to tune to a channel.
+  * **Usage:**
+    1.  In the web UI, when adding or editing a channel, select `fubo_plugin.py` from the **Plugin Script** dropdown.
+    2.  In the **Plugin List Position** field, enter the numerical position of the channel in your Fubo guide (e.g., `1` for the first channel, `2` for the second, and so on).
 
 ## **Configuration File (`roku_channels.json`)**
 
