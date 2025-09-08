@@ -47,7 +47,7 @@ class FuboPlugin(BaseAppPlugin):
             "Down",      # Navigate down to the "Live" or "Guide" section
             {"wait": 0.5},
             "Select",    # Select it to open the guide
-            {"wait": 1.5}  # Wait for the guide to load
+            {"wait": 1.7}  # Wait for the guide to load
         ]
 
         # Only add navigation steps if we are NOT on the first item.
@@ -62,5 +62,6 @@ class FuboPlugin(BaseAppPlugin):
         sequence.append({"wait": 0.7})
         sequence.append("Select")
         # --- END OF CUSTOMIZABLE NAVIGATION ---
+
 
         return sequence
