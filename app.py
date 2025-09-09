@@ -161,14 +161,15 @@ def send_key_sequence(device_ip, keys):
             return False
     return True
 
-def keep_alive_sender(roku_ip, key_string, stop_event):
+def keep_alive_sender(roku_ip, key_string, interval_minutes, stop_event):
     """Periodically sends a sequence of keypresses to a Roku to prevent timeouts."""
     keys = [k.strip() for k in key_string.split(',')]
-    if DEBUG_LOGGING_ENABLED:
-        logging.info(f"[Keep-Alive] Task started for {roku_ip}. Sending sequence {keys} every 3h 45m.")
+    interval_seconds = interval_minutes * 60
     
-    # Wait for 3 hours and 45 minutes (13500 seconds)
-    while not stop_event.wait(13500):
+    if DEBUG_LOGGING_ENABLED:
+        logging.info(f"[Keep-Alive] Task started for {roku_ip}. Sending sequence {keys} every {interval_minutes} minutes.")
+    
+    while not stop_event.wait(interval_seconds):
         try:
             logging.info(f"[Keep-Alive] Sending sequence {keys} to {roku_ip} to prevent timeout.")
             send_key_sequence(roku_ip, keys)
@@ -289,8 +290,9 @@ def stream_channel(channel_id):
 
     # --- Keep Alive Task ---
     if channel_data.get('keep_alive_enabled') and channel_data.get('keep_alive_key'):
+        interval = channel_data.get('keep_alive_interval', 225)
         stop_event = threading.Event()
-        thread = threading.Thread(target=keep_alive_sender, args=(locked_tuner['roku_ip'], channel_data['keep_alive_key'], stop_event))
+        thread = threading.Thread(target=keep_alive_sender, args=(locked_tuner['roku_ip'], channel_data['keep_alive_key'], interval, stop_event))
         thread.daemon = True
         thread.start()
         KEEP_ALIVE_TASKS[locked_tuner['roku_ip']] = (thread, stop_event)
