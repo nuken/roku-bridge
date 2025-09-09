@@ -1,8 +1,8 @@
 # **Roku Channels Bridge**
 
-[**Official Configuration Guide**](https://tuner.ct.ws)
-
 **Release: Beta 3.0**
+
+[**Official Configuration Guide**](https://tuner.ct.ws)
 
 This project provides a Dockerized bridge that integrates your Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and uses this script to manage channel changes and proxy the video stream.
 
@@ -117,6 +117,17 @@ The Fubo plugin is designed to navigate the guide and select a channel based on 
     1.  In the web UI, when adding or editing a channel, select `fubo_plugin.py` from the **Plugin Script** dropdown.
     2.  In the **Plugin List Position** field, enter the numerical position of the channel in your Fubo guide (e.g., `1` for the first channel, `2` for the second, and so on).
 
+### **3. Keep Alive: Handling "Still Watching?" Prompts**
+
+Some streaming apps, like DirecTV, will display a prompt asking if you are still watching after a long period of inactivity (e.g., 4 hours). The **Keep Alive** feature can automatically dismiss these prompts.
+
+  * **How it works:** When enabled for a channel, the bridge will send a specified keypress sequence to the Roku at a user-defined interval, simulating activity and preventing the prompt from ever appearing.
+  * **Configuration:**
+    1.  When adding or editing a channel in the web UI, find the **Keep Alive** section.
+    2.  Check the box to **enable** the feature.
+    3.  Set the **Interval** in minutes (defaults to 225, which is 3 hours and 45 minutes).
+    4.  In the **Keypress Sequence** field, enter the command you want to send. You can enter a single key or a comma-separated list of keys, including the `wait=<seconds>` command (e.g., `Left,wait=1,Right`). For DirecTV, a single `Left` keypress is sufficient.
+
 ## **Configuration File (`roku_channels.json`)**
 
 While all settings can be managed through the web interface, the configuration is stored in a `roku_channels.json` file. This section serves as a reference for the data structure.
@@ -129,35 +140,23 @@ While all settings can be managed through the web interface, the configuration i
   * **`priority`**: Determines the order tuners are used (lower number = higher priority).
   * **`encoding_mode`**: **(Optional)** Sets the stream handling mode for this specific tuner (`proxy`, `remux`, or `reencode`).
 
-### **`channels` Section (Example)**
+### **`channels` Section (Example with Keep Alive)**
 
 ```json
 {
-  "id": "my_custom_channel",
-  "name": "My Channel",
-  "roku_app_id": "12345",
-  "tvc_guide_stationid": "67890",
+  "id": "directv_espn",
+  "name": "ESPN",
+  "roku_app_id": "535121", 
+  "tvc_guide_stationid": "20364",
   "media_type": "live",
-  "tune_delay": 5,
-  "blank_duration": 15,
+  "tune_delay": 8,
   "key_sequence": [
-    "Down",
-    "wait=2",
     "Select"
-  ]
-},
-{
-      "id": "fox_one_wjzy",
-      "media_type": "live",
-      "name": "Fox 46",
-      "plugin_data": {
-        "list_position": 1
-      },
-      "plugin_script": "fox_one_plugin.py",
-      "roku_app_id": "808732",
-      "tune_delay": 6,
-      "tvc_guide_stationid": "11594"
-    }
+  ],
+  "keep_alive_enabled": true,
+  "keep_alive_key": "Left,wait=1,Right",
+  "keep_alive_interval": 225
+}
 ```
 
 ## **Advanced Settings (Environment Variables)**
