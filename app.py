@@ -30,7 +30,7 @@ DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 't
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 # A silent, empty MPEG-TS packet to keep the connection alive
-SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff'
+SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff'
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
@@ -47,6 +47,7 @@ CHANNELS = []
 EPG_CHANNELS = []
 TUNER_LOCK = threading.Lock()
 ENCODER_SETTINGS = {}
+KEEP_ALIVE_TASKS = {} # For managing periodic keypress threads
 
 # Create persistent HTTP session for Roku commands
 roku_session = requests.Session()
@@ -112,7 +113,14 @@ def lock_tuner():
     return None
 
 def release_tuner(tuner_ip):
-    """Releases a locked tuner and sends a 'Home' command."""
+    """Releases a locked tuner, stops keep-alive tasks, and sends 'Home'."""
+    # Stop any running keep-alive task for this tuner
+    if tuner_ip in KEEP_ALIVE_TASKS:
+        thread, stop_event = KEEP_ALIVE_TASKS.pop(tuner_ip)
+        stop_event.set()
+        thread.join(timeout=5) # Wait for thread to finish
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Stopped keep-alive task for {tuner_ip}")
+
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
@@ -128,10 +136,22 @@ def send_key_sequence(device_ip, keys):
     """Sends a sequence of keypresses to a device."""
     for key in keys:
         try:
+            # Handle dictionary-based wait for plugin compatibility
             if isinstance(key, dict) and 'wait' in key:
                 time.sleep(float(key['wait']))
                 continue
             
+            # Handle string-based wait for key_sequence and keep_alive
+            if isinstance(key, str) and key.lower().startswith('wait='):
+                try:
+                    duration = float(key.split('=')[1])
+                    if DEBUG_LOGGING_ENABLED: logging.info(f"Waiting for {duration} seconds...")
+                    time.sleep(duration)
+                    continue
+                except (ValueError, IndexError):
+                    logging.error(f"Invalid wait command: {key}")
+                    continue
+
             safe_key = f"Lit_{urllib.parse.quote(key)}" if len(key) == 1 else key
             roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
             if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
@@ -140,6 +160,23 @@ def send_key_sequence(device_ip, keys):
             logging.error(f"Failed to send key '{key}' to {device_ip}: {e}")
             return False
     return True
+
+def keep_alive_sender(roku_ip, key_string, stop_event):
+    """Periodically sends a sequence of keypresses to a Roku to prevent timeouts."""
+    keys = [k.strip() for k in key_string.split(',')]
+    if DEBUG_LOGGING_ENABLED:
+        logging.info(f"[Keep-Alive] Task started for {roku_ip}. Sending sequence {keys} every 3h 45m.")
+    
+    # Wait for 3 hours and 45 minutes (13500 seconds)
+    while not stop_event.wait(13500):
+        try:
+            logging.info(f"[Keep-Alive] Sending sequence {keys} to {roku_ip} to prevent timeout.")
+            send_key_sequence(roku_ip, keys)
+        except Exception as e:
+            logging.error(f"[Keep-Alive] Error sending key sequence to {roku_ip}: {e}")
+    
+    if DEBUG_LOGGING_ENABLED:
+        logging.info(f"[Keep-Alive] Task stopped for {roku_ip}.")
 
 def execute_tuning_in_background(roku_ip, channel_data):
     """The main tuning logic, designed to run in a background thread."""
@@ -249,6 +286,14 @@ def stream_channel(channel_id):
         return "Channel not found.", 404
 
     executor.submit(execute_tuning_in_background, locked_tuner['roku_ip'], channel_data)
+
+    # --- Keep Alive Task ---
+    if channel_data.get('keep_alive_enabled') and channel_data.get('keep_alive_key'):
+        stop_event = threading.Event()
+        thread = threading.Thread(target=keep_alive_sender, args=(locked_tuner['roku_ip'], channel_data['keep_alive_key'], stop_event))
+        thread.daemon = True
+        thread.start()
+        KEEP_ALIVE_TASKS[locked_tuner['roku_ip']] = (thread, stop_event)
 
     tuner_mode = locked_tuner.get('encoding_mode', ENCODING_MODE)
     blank_duration = channel_data.get('blank_duration', 0)
