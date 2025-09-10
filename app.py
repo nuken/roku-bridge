@@ -11,6 +11,9 @@ import signal # Added for Gunicorn reload
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
 
+# --- Import Plugin System ---
+from plugins import discovered_plugins
+
 app = Flask(__name__)
 
 # --- Disable caching ---
@@ -26,13 +29,13 @@ CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
+# A silent, empty MPEG-TS packet to keep the connection alive
+SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff'
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
-    if channels_input == "5.1":
-        return '6'
-    if channels_input == "7.1":
-        return '8'
+    if channels_input == "5.1": return '6'
+    if channels_input == "7.1": return '8'
     return channels_input
 
 AUDIO_CHANNELS = get_audio_channels()
@@ -41,9 +44,10 @@ AUDIO_CHANNELS = get_audio_channels()
 # --- State Management for Tuner Pool ---
 TUNERS = []
 CHANNELS = []
-EPG_CHANNELS = [] # New list for EPG channels
+EPG_CHANNELS = []
 TUNER_LOCK = threading.Lock()
 ENCODER_SETTINGS = {}
+KEEP_ALIVE_TASKS = {} # For managing periodic keypress threads
 
 # Create persistent HTTP session for Roku commands
 roku_session = requests.Session()
@@ -57,52 +61,45 @@ executor = ThreadPoolExecutor(max_workers=4)
 
 def get_encoder_options():
     """Detects available ffmpeg hardware acceleration."""
-    if DEBUG_LOGGING_ENABLED: logging.info("Detecting available hardware acceleration encoders...")
+    if DEBUG_LOGGING_ENABLED: logging.info("Detecting hardware acceleration...")
     try:
         result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, check=True)
-        available_encoders = result.stdout
-        if 'h264_nvenc' in available_encoders:
+        if 'h264_nvenc' in result.stdout:
             if DEBUG_LOGGING_ENABLED: logging.info("NVIDIA NVENC detected.")
             return {"codec": "h264_nvenc", "preset_args": ['-preset', 'p2'], "hwaccel_args": []}
-        if 'h264_qsv' in available_encoders:
+        if 'h264_qsv' in result.stdout:
             if DEBUG_LOGGING_ENABLED: logging.info("Intel QSV detected.")
             return {"codec": "h264_qsv", "preset_args": [], "hwaccel_args": ['-hwaccel', 'qsv', '-c:v', 'h264_qsv']}
-        if DEBUG_LOGGING_ENABLED: logging.info("No hardware acceleration detected. Using software encoding.")
+        if DEBUG_LOGGING_ENABLED: logging.info("No hardware acceleration found.")
         return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
     except Exception as e:
-        logging.error(f"ffmpeg detection failed: {e}. Defaulting to software encoding.")
+        logging.error(f"ffmpeg detection failed: {e}. Defaulting to software.")
         return {"codec": "libx264", "preset_args": ['-preset', 'superfast'], "hwaccel_args": []}
 
 def load_config():
-    """Loads tuner and channel configuration. Creates a default if not found."""
+    """Loads tuner and channel configuration."""
     global TUNERS, CHANNELS, EPG_CHANNELS
     if not os.path.exists(CONFIG_FILE_PATH):
-        logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating a default empty config.")
+        logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating default.")
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             with open(CONFIG_FILE_PATH, 'w') as f:
                 json.dump({"tuners": [], "channels": [], "epg_channels": []}, f, indent=2)
         except Exception as e:
-            logging.error(f"Could not create default config file: {e}")
+            logging.error(f"Could not create default config: {e}")
             TUNERS, CHANNELS, EPG_CHANNELS = [], [], []
             return
 
     try:
         with open(CONFIG_FILE_PATH, 'r') as f:
-            content = f.read()
-            if not content:
-                config_data = {"tuners": [], "channels": [], "epg_channels": []}
-            else:
-                config_data = json.loads(content)
-
+            config_data = json.load(f) or {}
         TUNERS = sorted(config_data.get('tuners', []), key=lambda x: x.get('priority', 99))
-        for tuner in TUNERS:
-            tuner['in_use'] = False
+        for tuner in TUNERS: tuner['in_use'] = False
         CHANNELS = config_data.get('channels', [])
-        EPG_CHANNELS = config_data.get('epg_channels', []) # Load epg_channels
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote channels, and {len(EPG_CHANNELS)} EPG channels.")
-    except (json.JSONDecodeError, Exception) as e:
-        logging.error(f"Error loading config file: {e}. It might be empty or corrupted.")
+        EPG_CHANNELS = config_data.get('epg_channels', [])
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote channels, {len(EPG_CHANNELS)} EPG channels.")
+    except Exception as e:
+        logging.error(f"Error loading config: {e}")
         TUNERS, CHANNELS, EPG_CHANNELS = [], [], []
 
 def lock_tuner():
@@ -111,171 +108,204 @@ def lock_tuner():
         for tuner in TUNERS:
             if not tuner.get('in_use'):
                 tuner['in_use'] = True
-                if DEBUG_LOGGING_ENABLED: logging.info(f"Locked tuner: {tuner.get('name', tuner.get('roku_ip'))}")
+                if DEBUG_LOGGING_ENABLED: logging.info(f"Locked tuner: {tuner.get('name')}")
                 return tuner
     return None
 
 def release_tuner(tuner_ip):
-    """Releases a locked tuner and sends a 'Home' command to the Roku."""
+    """Releases a locked tuner, stops keep-alive tasks, and sends 'Home'."""
+    # Stop any running keep-alive task for this tuner
+    if tuner_ip in KEEP_ALIVE_TASKS:
+        thread, stop_event = KEEP_ALIVE_TASKS.pop(tuner_ip)
+        stop_event.set()
+        thread.join(timeout=5) # Wait for thread to finish
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Stopped keep-alive task for {tuner_ip}")
+
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
                 tuner['in_use'] = False
-                if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name', tuner.get('roku_ip'))}")
-
-                def send_home_async():
-                    try:
-                        home_url = f"http://{tuner_ip}:8060/keypress/Home"
-                        roku_session.post(home_url)
-                        if DEBUG_LOGGING_ENABLED:
-                            logging.info(f"Sent 'Home' command to Roku at {tuner_ip}")
-                    except requests.exceptions.RequestException as e:
-                        if DEBUG_LOGGING_ENABLED:
-                            logging.warning(f"Failed to send 'Home' command to Roku at {tuner_ip}: {e}")
-
-                executor.submit(send_home_async)
+                if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name')}")
+                try:
+                    roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
+                except requests.exceptions.RequestException as e:
+                    if DEBUG_LOGGING_ENABLED: logging.warning(f"Failed to send 'Home' to {tuner_ip}: {e}")
                 break
 
-def tune_roku_async(roku_ip, tune_url):
-    """Tune Roku in a separate thread to reduce blocking."""
-    try:
-        response = roku_session.post(tune_url)
-        response.raise_for_status()
-        return True
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to tune Roku at {roku_ip}: {e}")
-        return False
-
-def send_key_sequence(device_ip, keys, is_reboot=False):
-    """Sends a sequence of keypresses to a device with configurable delays."""
-    first_key_delay = 1.0 if is_reboot else 0.5
-    subsequent_key_delay = 0.3
-
-    is_first_key = True
+def send_key_sequence(device_ip, keys):
+    """Sends a sequence of keypresses to a device."""
     for key in keys:
         try:
-            # --- MODIFIED SECTION for variable wait command ---
-            if key.lower().startswith('wait'):
-                wait_duration = 1.0 # Default wait time
-                parts = key.split('=')
-                if len(parts) > 1:
-                    try:
-                        wait_duration = float(parts[1])
-                    except ValueError:
-                        logging.warning(f"Invalid wait duration '{parts[1]}'. Defaulting to 1 second.")
-
-                if DEBUG_LOGGING_ENABLED: logging.info(f"Executing {wait_duration}-second wait on {device_ip}")
-                time.sleep(wait_duration)
+            # Handle dictionary-based wait for plugin compatibility
+            if isinstance(key, dict) and 'wait' in key:
+                time.sleep(float(key['wait']))
                 continue
-            # --- END OF MODIFIED SECTION ---
+            
+            # Handle string-based wait for key_sequence and keep_alive
+            if isinstance(key, str) and key.lower().startswith('wait='):
+                try:
+                    duration = float(key.split('=')[1])
+                    if DEBUG_LOGGING_ENABLED: logging.info(f"Waiting for {duration} seconds...")
+                    time.sleep(duration)
+                    continue
+                except (ValueError, IndexError):
+                    logging.error(f"Invalid wait command: {key}")
+                    continue
 
-            # For literal characters, format them correctly for the Roku ECP
-            if len(key) == 1:
-                safe_key = f"Lit_{urllib.parse.quote(key)}"
-            else:
-                safe_key = key
-
+            safe_key = f"Lit_{urllib.parse.quote(key)}" if len(key) == 1 else key
             roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
             if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
-
-            if is_first_key:
-                time.sleep(first_key_delay)
-                is_first_key = False
-            else:
-                time.sleep(subsequent_key_delay)
-        except requests.exceptions.RequestException as e:
+            time.sleep(0.5) # Delay between keys
+        except Exception as e:
             logging.error(f"Failed to send key '{key}' to {device_ip}: {e}")
             return False
     return True
 
+def keep_alive_sender(roku_ip, key_string, interval_minutes, stop_event):
+    """Periodically sends a sequence of keypresses to a Roku to prevent timeouts."""
+    keys = [k.strip() for k in key_string.split(',')]
+    interval_seconds = interval_minutes * 60
+    
+    if DEBUG_LOGGING_ENABLED:
+        logging.info(f"[Keep-Alive] Task started for {roku_ip}. Sending sequence {keys} every {interval_minutes} minutes.")
+    
+    while not stop_event.wait(interval_seconds):
+        try:
+            logging.info(f"[Keep-Alive] Sending sequence {keys} to {roku_ip} to prevent timeout.")
+            send_key_sequence(roku_ip, keys)
+        except Exception as e:
+            logging.error(f"[Keep-Alive] Error sending key sequence to {roku_ip}: {e}")
+    
+    if DEBUG_LOGGING_ENABLED:
+        logging.info(f"[Keep-Alive] Task stopped for {roku_ip}.")
 
-def send_additional_commands(roku_ip, channel_data):
-    """Sends the 'Select' command to the Roku."""
+def execute_tuning_in_background(roku_ip, channel_data):
+    """The main tuning logic, designed to run in a background thread."""
     try:
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Tuning to actual channel {channel_data['name']}...")
+        
+        # 1. Launch the app
+        launch_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
+        roku_session.post(launch_url)
+        
+        # 2. Wait for app to load
+        tune_delay = channel_data.get("tune_delay", 1)
+        time.sleep(tune_delay)
+
+        # 3. Determine and execute the tuning method
+        plugin_script = channel_data.get('plugin_script')
+        key_sequence = channel_data.get('key_sequence')
+
+        if plugin_script and plugin_script in discovered_plugins:
+            plugin = discovered_plugins[plugin_script]
+            final_sequence = plugin.tune_channel(roku_ip, channel_data)
+            if final_sequence:
+                send_key_sequence(roku_ip, final_sequence)
+
+        elif key_sequence:
+            send_key_sequence(roku_ip, key_sequence)
+
+        else: # Deep Linking
+            content_id = channel_data.get('deep_link_content_id')
+            if content_id:
+                media_type = channel_data.get('media_type', 'live')
+                params = f"?contentId={content_id}&mediaType={media_type}"
+                if DEBUG_LOGGING_ENABLED: logging.info(f"Sending deep link command: {launch_url}{params}")
+                roku_session.post(f"{launch_url}{params}")
+        
+        # 4. Final 'Select' keypress if needed
         if channel_data.get('needs_select_keypress'):
-            select_url = f"http://{roku_ip}:8060/keypress/Select"
-            roku_session.post(select_url)
-            if DEBUG_LOGGING_ENABLED:
-                logging.info(f"Sent Select keypress to {roku_ip}")
+            time.sleep(1)
+            send_key_sequence(roku_ip, ["Select"])
 
-    except requests.exceptions.RequestException as e:
-        if DEBUG_LOGGING_ENABLED:
-            logging.warning(f"Failed to send additional commands to {roku_ip}: {e}")
-
-# --- Streaming Functions ---
-
-def reencode_stream_generator(encoder_url, roku_ip_to_release):
-    """Generator for a more optimized ffmpeg method.
-    It copies the video stream and re-encodes only the audio.
-    This is much less CPU-intensive than a full re-encode."""
-    try:
-        command = [
-            'ffmpeg',
-            '-analyzeduration', '1M',
-            '-probesize', '1M',
-            '-err_detect', 'ignore_err',
-            '-fflags', '+genpts',
-            '-i', encoder_url,
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-b:a', AUDIO_BITRATE,
-            '-ac', AUDIO_CHANNELS,
-            '-f', 'mpegts',
-            '-loglevel', 'error',
-            '-'
-        ]
-        if DEBUG_LOGGING_ENABLED:
-            logging.info(f"Starting FFMPEG RE-ENCODE (Audio Only) for tuner {roku_ip_to_release} with {AUDIO_CHANNELS} audio channels.")
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for chunk in iter(lambda: process.stdout.read(8192), b''):
-            yield chunk
-        process.wait()
-        if process.returncode != 0:
-            stderr_output = process.stderr.read().decode()
-            logging.error(f"ffmpeg for {roku_ip_to_release} exited with error: {stderr_output}")
-    finally:
-        release_tuner(roku_ip_to_release)
-
-def remux_stream_generator(encoder_url, roku_ip_to_release):
-    """Generator for the low-CPU ffmpeg remuxing method."""
-    try:
-        command = [
-            'ffmpeg',
-            '-analyzeduration', '1M',
-            '-probesize', '1M',
-            '-i', encoder_url,
-            '-c', 'copy',
-            '-f', 'mpegts',
-            '-loglevel', 'error',
-            '-'
-        ]
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting FFMPEG REMUX for tuner {roku_ip_to_release}")
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for chunk in iter(lambda: process.stdout.read(8192), b''):
-            yield chunk
-        process.wait()
-        if process.returncode != 0:
-            logging.error(f"ffmpeg for {roku_ip_to_release} exited with error: {process.stderr.read().decode()}")
-    finally:
-        release_tuner(roku_ip_to_release)
-
-def proxy_stream_generator(encoder_url, roku_ip_to_release):
-    """Generator for the low-CPU, resilient HTTPX proxy method."""
-    try:
-        if DEBUG_LOGGING_ENABLED: logging.info(f"Starting HTTPX PROXY for tuner {roku_ip_to_release}")
-        transport = httpx.HTTPTransport(retries=5)
-        timeout = httpx.Timeout(15.0)
-        with httpx.Client(timeout=timeout, transport=transport, follow_redirects=True) as client:
-            with client.stream("GET", encoder_url) as r:
-                r.raise_for_status()
-                for data in r.iter_bytes():
-                    yield data
     except Exception as e:
-        logging.error(f"Error in proxy_stream_generator for {roku_ip_to_release}: {e}")
+        logging.error(f"Error during background tuning for {roku_ip}: {e}")
+
+@app.route('/upload_splash', methods=['POST'])
+def upload_splash():
+    if 'file' not in request.files:
+        return "No file part in the request.", 400
+    file = request.files['file']
+    if file.filename == '':
+        return "No file selected for uploading.", 400
+    
+    save_path = os.path.join(CONFIG_DIR, 'splash.ts')
+    
+    try:
+        file.save(save_path)
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Splash screen saved to {save_path}")
+        return "Splash screen uploaded successfully!", 200
+    except Exception as e:
+        logging.error(f"Error saving splash screen: {e}")
+        return f"Error saving file: {e}", 500
+
+def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_duration=0):
+    """
+    A generator that handles all streaming modes.
+    If blank_duration is > 0, it first streams silent TS packets for that duration.
+    """
+    try:
+        # Step 1: Stream silent packets for the blanking duration
+        if blank_duration > 0:
+            if DEBUG_LOGGING_ENABLED: logging.info(f"Starting silent stream for {blank_duration} seconds...")
+            start_time = time.time()
+            while time.time() - start_time < blank_duration:
+                yield SILENT_TS_PACKET
+                time.sleep(0.1) # Send a packet every 100ms
+            if DEBUG_LOGGING_ENABLED: logging.info("Finished silent stream.")
+
+        # Step 2: Switch to the main stream
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Switching to live stream from encoder ({mode} mode)...")
+        if mode in ['remux', 'reencode']:
+            command = ['ffmpeg', '-i', encoder_url]
+            if mode == 'reencode':
+                command.extend(['-c:v', 'copy', '-c:a', 'aac', '-b:a', AUDIO_BITRATE, '-ac', AUDIO_CHANNELS])
+            else:
+                command.extend(['-c', 'copy'])
+            command.extend(['-f', 'mpegts', '-loglevel', 'error', '-'])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for chunk in iter(lambda: process.stdout.read(8192), b''):
+                yield chunk
+            process.wait()
+        else: # Proxy
+            with httpx.stream("GET", encoder_url, timeout=15, follow_redirects=True) as r:
+                for chunk in r.iter_bytes():
+                    yield chunk
+    except Exception as e:
+        logging.error(f"Stream error for {roku_ip_to_release} ({mode}): {e}")
     finally:
         release_tuner(roku_ip_to_release)
 
-# --- Flask Routes ---
+@app.route('/stream/<channel_id>')
+def stream_channel(channel_id):
+    locked_tuner = lock_tuner()
+    if not locked_tuner: return "All tuners are in use.", 503
+
+    channel_data = next((c for c in CHANNELS + EPG_CHANNELS if c["id"] == channel_id), None)
+    if not channel_data:
+        release_tuner(locked_tuner['roku_ip'])
+        return "Channel not found.", 404
+
+    executor.submit(execute_tuning_in_background, locked_tuner['roku_ip'], channel_data)
+
+    # --- Keep Alive Task ---
+    if channel_data.get('keep_alive_enabled') and channel_data.get('keep_alive_key'):
+        interval = channel_data.get('keep_alive_interval', 225)
+        stop_event = threading.Event()
+        thread = threading.Thread(target=keep_alive_sender, args=(locked_tuner['roku_ip'], channel_data['keep_alive_key'], interval, stop_event))
+        thread.daemon = True
+        thread.start()
+        KEEP_ALIVE_TASKS[locked_tuner['roku_ip']] = (thread, stop_event)
+
+    tuner_mode = locked_tuner.get('encoding_mode', ENCODING_MODE)
+    blank_duration = channel_data.get('blank_duration', 0)
+    generator = stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'], tuner_mode, blank_duration)
+    
+    return Response(stream_with_context(generator), mimetype='video/mpeg')
+
+@app.route('/api/plugins')
+def get_plugins():
+    return jsonify([{"id": name, "name": plugin.app_name} for name, plugin in discovered_plugins.items()])
 
 def generate_m3u_from_channels(channel_list):
     """Generic M3U generator."""
@@ -283,32 +313,14 @@ def generate_m3u_from_channels(channel_list):
     for channel in channel_list:
         stream_url = f"http://{request.host}/stream/{channel['id']}"
         extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
-
-        tags_to_add = {
-            "tvg-name": "name",
-            "channel-number": "channel-number",
-            "tvg-logo": "tvg-logo",
-            "tvc-guide-title": "tvc-guide-title",
-            "tvc-guide-description": "tvc-guide-description",
-            "tvc-guide-art": "tvc-guide-art",
-            "tvc-guide-tags": "tvc-guide-tags",
-            "tvc-guide-genres": "tvc-guide-genres",
-            "tvc-guide-categories": "tvc-guide-categories",
-            "tvc-guide-placeholders": "tvc-guide-placeholders",
-            "tvc-stream-vcodec": "tvc-stream-vcodec",
-            "tvc-stream-acodec": "tvc-stream-acodec",
-            "tvc-guide-stationid": "tvc_guide_stationid"
-        }
-
-        for tag, key in tags_to_add.items():
-            if key in channel:
-                extinf_line += f' {tag}="{channel[key]}"'
-
+        tags = { "tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo", "tvc-guide-title": "tvc-guide-title",
+            "tvc-guide-description": "tvc-guide-description", "tvc-guide-art": "tvc-guide-art", "tvc-guide-tags": "tvc-guide-tags",
+            "tvc-guide-genres": "tvc-guide-genres", "tvc-guide-categories": "tvc-guide-categories", "tvc-guide-placeholders": "tvc-guide-placeholders",
+            "tvc-stream-vcodec": "tvc-stream-vcodec", "tvc-stream-acodec": "tvc-stream-acodec", "tvc-guide-stationid": "tvc_guide_stationid" }
+        for tag, key in tags.items():
+            if key in channel: extinf_line += f' {tag}="{channel[key]}"'
         extinf_line += f',{channel["name"]}'
-
-        m3u_content.append(extinf_line)
-        m3u_content.append(stream_url)
-
+        m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
 @app.route('/channels.m3u')
@@ -319,99 +331,6 @@ def generate_gracenote_m3u():
 def generate_epg_m3u():
     return generate_m3u_from_channels(EPG_CHANNELS)
 
-@app.route('/stream/<channel_id>')
-def stream_channel(channel_id):
-    start_time = time.time()
-    locked_tuner = lock_tuner()
-    if not locked_tuner:
-        return "All tuners are currently in use.", 503
-
-    # Look for the channel in both lists
-    channel_data = next((c for c in CHANNELS if c["id"] == channel_id), None)
-    if not channel_data:
-        channel_data = next((c for c in EPG_CHANNELS if c["id"] == channel_id), None)
-
-    if not channel_data:
-        release_tuner(locked_tuner['roku_ip'])
-        return "Channel not found.", 404
-
-    roku_ip = locked_tuner['roku_ip']
-
-    try:
-        key_sequence = channel_data.get('key_sequence')
-
-        # Launch the app first, regardless of tuning method
-        launch_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
-        launch_future = executor.submit(tune_roku_async, roku_ip, launch_url)
-
-        if not launch_future.result(timeout=5):
-            release_tuner(roku_ip)
-            return "Failed to launch Roku app", 500
-
-        # Get the tune delay for the app to load, defaulting to 3 seconds.
-        tune_delay = channel_data.get("tune_delay", 3)
-        if DEBUG_LOGGING_ENABLED:
-            logging.info(f"Waiting {tune_delay} seconds for app to load...")
-        time.sleep(tune_delay)
-
-        if key_sequence and isinstance(key_sequence, list):
-            # Method 1: Key Sequence
-            if DEBUG_LOGGING_ENABLED:
-                logging.info(f"Executing key sequence for channel {channel_id}: {key_sequence}")
-            send_key_sequence(roku_ip, key_sequence)
-
-        else:
-            # Method 2: Deep Linking (Original Method)
-            content_id = channel_data.get('deep_link_content_id')
-            if content_id:
-                media_type = channel_data.get('media_type', 'live')
-                if '=' in content_id or '&' in content_id:
-                    roku_tune_url = f"{launch_url}?{content_id}&mediaType={media_type}"
-                else:
-                    roku_tune_url = f"{launch_url}?contentId={content_id}&mediaType={media_type}"
-
-                if DEBUG_LOGGING_ENABLED:
-                    logging.info(f"Constructed deep link URL: {roku_tune_url}")
-
-                # We re-POST the launch command with deep link parameters
-                tune_future = executor.submit(tune_roku_async, roku_ip, roku_tune_url)
-                if not tune_future.result(timeout=5):
-                    # Don't release tuner, just log a warning, as the app is already open.
-                    logging.warning(f"Failed to send deep link command to Roku for channel {channel_id}")
-            else:
-                 logging.warning(f"Channel {channel_id} has no deep_link_content_id or key_sequence. Stream may fail.")
-
-
-        # If a 'Select' press is needed, wait an additional second before sending it.
-        if channel_data.get('needs_select_keypress'):
-            if DEBUG_LOGGING_ENABLED:
-                logging.info(f"Channel requires 'Select' press. Waiting an additional 1 second.")
-            time.sleep(1) # Add a 1-second delay before the keypress
-            send_additional_commands(roku_ip, channel_data)
-
-        if DEBUG_LOGGING_ENABLED:
-            total_time = time.time() - start_time
-            logging.info(f"Total tuning time for {channel_id}: {total_time:.2f} seconds. Starting stream.")
-
-    except Exception as e:
-        release_tuner(roku_ip)
-        return f"Failed to tune Roku: {e}", 500
-
-    # Determine the encoding mode for this specific tuner, falling back to the global setting.
-    tuner_encoding_mode = locked_tuner.get('encoding_mode', ENCODING_MODE)
-
-    if DEBUG_LOGGING_ENABLED:
-        logging.info(f"Using '{tuner_encoding_mode}' mode for tuner {roku_ip}")
-
-    if tuner_encoding_mode == 'reencode':
-        stream_generator = reencode_stream_generator(locked_tuner['encoder_url'], roku_ip)
-    elif tuner_encoding_mode == 'remux':
-        stream_generator = remux_stream_generator(locked_tuner['encoder_url'], roku_ip)
-    else: # Defaults to 'proxy'
-        stream_generator = proxy_stream_generator(locked_tuner['encoder_url'], roku_ip)
-
-    return Response(stream_with_context(stream_generator), mimetype='video/mpeg')
-
 @app.route('/upload_config', methods=['POST'])
 def upload_config():
     if 'file' not in request.files: return "No file part", 400
@@ -420,23 +339,43 @@ def upload_config():
     try:
         file.save(CONFIG_FILE_PATH)
         load_config()
-
-        try:
-            master_pid = os.getppid()
-            logging.info(f"Configuration updated. Sending SIGHUP to master process (PID: {master_pid}) to reload worker.")
-            os.kill(master_pid, signal.SIGHUP)
-        except Exception as e:
-            logging.error(f"Could not signal Gunicorn to reload: {e}")
-
+        os.kill(os.getppid(), signal.SIGHUP)
         return "Configuration updated successfully. Server is reloading...", 200
     except Exception as e:
         return f"Error processing config file: {e}", 400
 
+@app.route('/upload_plugin', methods=['POST'])
+def upload_plugin():
+    if 'file' not in request.files:
+        return "No file part", 400
+    file = request.files['file']
+    if file.filename == '' or not file.filename.endswith('_plugin.py'):
+        return "Invalid file. Must be a '_plugin.py' file.", 400
+    
+    try:
+        # Determine the plugins directory
+        plugins_dir = os.path.join(os.path.dirname(__file__), 'plugins')
+        os.makedirs(plugins_dir, exist_ok=True) # Ensure it exists
+        save_path = os.path.join(plugins_dir, file.filename)
+        
+        # Prevent directory traversal attacks
+        if not os.path.normpath(save_path).startswith(os.path.abspath(plugins_dir)):
+             return "Invalid filename", 400
+
+        file.save(save_path)
+        logging.info(f"New plugin uploaded: {file.filename}")
+        
+        # Reload gunicorn to discover the new plugin
+        os.kill(os.getppid(), signal.SIGHUP)
+        
+        return "Plugin uploaded successfully. Server is reloading...", 200
+    except Exception as e:
+        logging.error(f"Error saving plugin: {e}")
+        return f"Error saving plugin file: {e}", 500
+
 @app.route('/')
 def index():
     return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a>"
-
-# --- Remote Control Routes ---
 
 @app.route('/remote')
 def remote_control():
@@ -444,60 +383,32 @@ def remote_control():
 
 @app.route('/remote/devices')
 def get_remote_devices():
-    remote_devices = [{"name": tuner.get("name", tuner["roku_ip"]), "roku_ip": tuner["roku_ip"]} for tuner in TUNERS]
-    return jsonify(remote_devices)
+    return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
 
 @app.route('/remote/keypress/<device_ip>/<key>', methods=['POST'])
 def remote_keypress(device_ip, key):
-    if not any(tuner['roku_ip'] == device_ip for tuner in TUNERS):
-        return jsonify({"status": "error", "message": "Device not found."}), 404
+    if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
     try:
-        # CORRECTED: The key is now properly encoded before being sent to the Roku device.
-        # Flask decodes the URL from the browser, so we must re-encode it for the Roku.
-        safe_key = urllib.parse.quote(key)
-        roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
+        roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}")
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/remote/reboot/<device_ip>', methods=['POST'])
 def remote_reboot(device_ip):
-    if not any(tuner['roku_ip'] == device_ip for tuner in TUNERS):
-        return jsonify({"status": "error", "message": "Device not found."}), 404
-
-    reboot_sequence = [
-        'Home', 'Home', 'Home',
-        'Up',
-        'Right',
-        'Up',
-        'Right',
-        'Up',
-        'Up',
-        'Right',
-        'Select'
-    ]
-
-    # Run the sequence in a background thread to avoid blocking
-    executor.submit(send_key_sequence, device_ip, reboot_sequence, is_reboot=True)
-
+    if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
+    reboot_sequence = ['Home', 'Home', 'Home', 'Up', 'Right', 'Up', 'Right', 'Up', 'Up', 'Right', 'Select']
+    executor.submit(send_key_sequence, device_ip, reboot_sequence)
     return jsonify({"status": "success", "message": "Reboot sequence initiated."})
-
-# --- Status Page & Config API Routes ---
 
 @app.route('/status')
 def status_page():
-    """Renders the main status and configuration page."""
-    global_settings = {
-        'encoding_mode': ENCODING_MODE,
-        'audio_bitrate': AUDIO_BITRATE,
-        'audio_channels': os.getenv('AUDIO_CHANNELS', '2'),
-        'debug_logging': DEBUG_LOGGING_ENABLED
-    }
-    return render_template('status.html', global_settings=global_settings)
+    settings = { 'encoding_mode': ENCODING_MODE, 'audio_bitrate': AUDIO_BITRATE,
+                 'audio_channels': os.getenv('AUDIO_CHANNELS', '2'), 'debug_logging': DEBUG_LOGGING_ENABLED }
+    return render_template('status.html', global_settings=settings)
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
-    """Returns the current JSON configuration from the file."""
     try:
         with open(CONFIG_FILE_PATH, 'r') as f:
             config_data = json.load(f)
@@ -510,27 +421,15 @@ def get_config():
 
 @app.route('/api/config', methods=['POST'])
 def update_config():
-    """Receives a full JSON config, saves it, and reloads the server."""
     try:
         new_config = request.get_json()
         if not all(k in new_config for k in ['tuners', 'channels', 'epg_channels']):
             return jsonify({"error": "Invalid configuration structure."}), 400
-
-        with open(CONFIG_FILE_PATH, 'w') as f:
-            json.dump(new_config, f, indent=2)
-
+        with open(CONFIG_FILE_PATH, 'w') as f: json.dump(new_config, f, indent=2)
         load_config()
-
-        try:
-            master_pid = os.getppid()
-            logging.info(f"Config updated via API. Sending SIGHUP to master process (PID: {master_pid}) to reload worker.")
-            os.kill(master_pid, signal.SIGHUP)
-        except Exception as e:
-            logging.error(f"Could not signal Gunicorn to reload: {e}")
-
+        os.kill(os.getppid(), signal.SIGHUP)
         return jsonify({"message": "Configuration saved successfully. Server is reloading."}), 200
     except Exception as e:
-        logging.error(f"Error saving config file via API: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status')
@@ -540,42 +439,35 @@ def api_status():
     def check_tuner_status(tuner):
         roku_ip = tuner['roku_ip']
         encoder_url = tuner['encoder_url']
+        roku_status = 'offline'
+        encoder_status = 'offline'
 
         try:
-            roku_session.get(f"http://{roku_ip}:8060", timeout=2)
+            roku_session.get(f"http://{roku_ip}:8060", timeout=3)
             roku_status = 'online'
         except requests.exceptions.RequestException:
-            roku_status = 'offline'
+            pass
 
         try:
-            response = requests.head(encoder_url, timeout=2, allow_redirects=True)
-            response.raise_for_status()
-            encoder_status = 'online'
-        except requests.exceptions.RequestException:
-            try:
-                response = requests.get(encoder_url, timeout=2, stream=True)
+            with requests.get(encoder_url, timeout=5, stream=True, allow_redirects=True) as response:
                 response.raise_for_status()
-                encoder_status = 'online'
-            except requests.exceptions.RequestException:
-                encoder_status = 'offline'
+                if next(response.iter_content(1), None):
+                    encoder_status = 'online'
+        except requests.exceptions.RequestException:
+            pass
 
         return {
-            "name": tuner.get("name", roku_ip),
-            "roku_ip": roku_ip,
-            "encoder_url": encoder_url,
-            "roku_status": roku_status,
-            "encoder_status": encoder_status
+            "name": tuner.get("name", roku_ip), "roku_ip": roku_ip, "encoder_url": encoder_url,
+            "roku_status": roku_status, "encoder_status": encoder_status
         }
 
     with ThreadPoolExecutor(max_workers=len(TUNERS) or 1) as status_executor:
-        status_futures = [status_executor.submit(check_tuner_status, tuner) for tuner in TUNERS]
-        statuses = [future.result() for future in status_futures]
+        statuses = list(status_executor.map(check_tuner_status, TUNERS))
 
     tuner_configs = [{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"], "encoder_url": t["encoder_url"]} for t in TUNERS]
 
     return jsonify({"tuners": tuner_configs, "statuses": statuses})
 
-# --- App Initialization ---
 if __name__ != '__main__':
     load_config()
     ENCODER_SETTINGS = get_encoder_options()
