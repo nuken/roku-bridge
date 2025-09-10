@@ -34,6 +34,7 @@ RUN mkdir -p /app/config
 COPY app.py .
 COPY plugins/ /app/plugins/
 COPY templates/ /app/templates/
+COPY static/ /app/static/
 
 # Expose the port the app runs on
 EXPOSE 5000
