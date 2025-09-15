@@ -1,5 +1,6 @@
 import subprocess
 import logging
+from logging import StreamHandler
 import json
 import os
 import requests
@@ -8,6 +9,7 @@ import threading
 import httpx
 import urllib.parse # Added for URL encoding
 import signal # Added for Gunicorn reload
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
 
@@ -16,12 +18,41 @@ from plugins import discovered_plugins
 
 app = Flask(__name__)
 
+# --- Application Version ---
+APP_VERSION = "3.1"
+
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 
+# --- Global Log Buffer ---
+LOG_BUFFER_SIZE = 1000  # Store the last 1000 log lines
+log_buffer = deque(maxlen=LOG_BUFFER_SIZE)
+
+class DequeLogHandler(StreamHandler):
+    """A logging handler that writes records to a deque."""
+    def __init__(self, target_deque):
+        super().__init__()
+        self.target_deque = target_deque
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.target_deque.append(msg)
+        except Exception:
+            self.handleError(record)
+
 # --- Basic Configuration ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log_format = '%(asctime)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=logging.INFO, format=log_format)
+
+# Add our custom handler to the root logger to capture all logs
+root_logger = logging.getLogger()
+deque_handler = DequeLogHandler(log_buffer)
+formatter = logging.Formatter(log_format)
+deque_handler.setFormatter(formatter)
+root_logger.addHandler(deque_handler)
+
 
 # --- Environment & Global Variables ---
 CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
@@ -30,7 +61,7 @@ DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 't
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 # A silent, empty MPEG-TS packet to keep the connection alive
-SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff'
+SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff'
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
@@ -278,6 +309,7 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
 
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
+    is_preview = request.args.get('preview', 'false').lower() == 'true'
     locked_tuner = lock_tuner()
     if not locked_tuner: return "All tuners are in use.", 503
 
@@ -298,7 +330,7 @@ def stream_channel(channel_id):
         KEEP_ALIVE_TASKS[locked_tuner['roku_ip']] = (thread, stop_event)
 
     tuner_mode = locked_tuner.get('encoding_mode', ENCODING_MODE)
-    blank_duration = channel_data.get('blank_duration', 0)
+    blank_duration = 0 if is_preview else channel_data.get('blank_duration', 0)
     generator = stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'], tuner_mode, blank_duration)
     
     return Response(stream_with_context(generator), mimetype='video/mpeg')
@@ -375,11 +407,28 @@ def upload_plugin():
 
 @app.route('/')
 def index():
-    return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a>"
+    return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a> | <a href='/preview'>Channel Preview</a>"
 
 @app.route('/remote')
 def remote_control():
     return render_template('remote.html')
+
+@app.route('/preview')
+def preview():
+    """Renders the preview page with a list of all channels."""
+    all_channels = sorted(CHANNELS + EPG_CHANNELS, key=lambda x: x.get('name', '').lower())
+    return render_template('preview.html', channels=all_channels)
+
+@app.route('/logs')
+def logs_page():
+    """Renders the log viewer page."""
+    return render_template('logs.html')
+
+@app.route('/logs/content')
+def logs_content():
+    """Returns the buffered logs as plain text."""
+    return Response("\n".join(log_buffer), mimetype='text/plain')
+
 
 @app.route('/remote/devices')
 def get_remote_devices():
@@ -403,8 +452,13 @@ def remote_reboot(device_ip):
 
 @app.route('/status')
 def status_page():
-    settings = { 'encoding_mode': ENCODING_MODE, 'audio_bitrate': AUDIO_BITRATE,
-                 'audio_channels': os.getenv('AUDIO_CHANNELS', '2'), 'debug_logging': DEBUG_LOGGING_ENABLED }
+    settings = { 
+        'encoding_mode': ENCODING_MODE, 
+        'audio_bitrate': AUDIO_BITRATE,
+        'audio_channels': os.getenv('AUDIO_CHANNELS', '2'), 
+        'debug_logging': DEBUG_LOGGING_ENABLED,
+        'app_version': APP_VERSION
+    }
     return render_template('status.html', global_settings=settings)
 
 @app.route('/api/config', methods=['GET'])

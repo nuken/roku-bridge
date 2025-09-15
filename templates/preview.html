@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roku Channel Preview</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #2c2c2c;
+            --surface-color: #3a3a3a;
+            --primary-color: #7dd3fc;
+            --text-color: #e0e0e0;
+            --border-color: #4a4a4a;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            gap: 20px;
+            height: calc(100vh - 40px);
+            box-sizing: border-box;
+        }
+        .container {
+            display: flex;
+            width: 100%;
+            gap: 20px;
+            height: 100%;
+        }
+        .channel-list-container {
+            background-color: var(--surface-color);
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+            width: 30%;
+            overflow-y: auto;
+        }
+        .video-container {
+            background-color: #000;
+            border-radius: 20px;
+            width: 70%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            border-radius: 20px;
+            object-fit: contain; /* Ensures video aspect ratio is maintained */
+            background-color: #000; /* Prevents transparent background before video loads */
+        }
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        li {
+            padding: 15px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        li:hover, li.active {
+            background-color: var(--border-color);
+        }
+        li:last-child {
+            border-bottom: none;
+        }
+        .nav-links {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+        .nav-links a {
+            color: var(--primary-color);
+            text-decoration: none;
+            margin: 0 15px;
+            font-size: 1.1em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="channel-list-container">
+            <h1><i class="fa-solid fa-list"></i> Channels</h1>
+            <ul id="channel-list">
+                {% for channel in channels %}
+                    <li id="channel-{{ channel.id }}" onclick="playChannel('{{ channel.id }}', this)">{{ channel.name }}</li>
+                {% endfor %}
+            </ul>
+             <div class="nav-links">
+                <a href="/status">Go to Status</a>
+                <a href="/remote">Go to Remote</a>
+            </div>
+        </div>
+        <div class="video-container">
+            <video id="video-player" controls autoplay muted playsinline>
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('video-player');
+        const channelList = document.getElementById('channel-list');
+        let player;
+
+        function cleanupPlayer() {
+            if (player) {
+                player.unload();
+                player.detachMediaElement();
+                player.destroy();
+                player = null;
+            }
+        }
+        
+        window.addEventListener('beforeunload', cleanupPlayer);
+
+        function playChannel(channelId, element) {
+            cleanupPlayer();
+
+            const currentlyActive = channelList.querySelector('.active');
+            if (currentlyActive) {
+                currentlyActive.classList.remove('active');
+            }
+            element.classList.add('active');
+
+            const streamUrl = `/stream/${channelId}?preview=true`;
+            
+            if (mpegts.isSupported()) {
+                player = mpegts.createPlayer({
+                    type: 'mpegts',
+                    isLive: true,
+                    url: streamUrl
+                });
+                player.attachMediaElement(videoElement);
+                player.load();
+                player.play();
+            } else {
+                alert('Your browser does not support mpegts.js playback.');
+            }
+        }
+    </script>
+</body>
+</html>
