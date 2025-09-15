@@ -18,6 +18,9 @@ from plugins import discovered_plugins
 
 app = Flask(__name__)
 
+# --- Application Version ---
+APP_VERSION = "3.1"
+
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['TEMPLATES_AUTO_RELOAD'] = True
@@ -449,8 +452,13 @@ def remote_reboot(device_ip):
 
 @app.route('/status')
 def status_page():
-    settings = { 'encoding_mode': ENCODING_MODE, 'audio_bitrate': AUDIO_BITRATE,
-                 'audio_channels': os.getenv('AUDIO_CHANNELS', '2'), 'debug_logging': DEBUG_LOGGING_ENABLED }
+    settings = { 
+        'encoding_mode': ENCODING_MODE, 
+        'audio_bitrate': AUDIO_BITRATE,
+        'audio_channels': os.getenv('AUDIO_CHANNELS', '2'), 
+        'debug_logging': DEBUG_LOGGING_ENABLED,
+        'app_version': APP_VERSION
+    }
     return render_template('status.html', global_settings=settings)
 
 @app.route('/api/config', methods=['GET'])

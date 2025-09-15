@@ -13,6 +13,7 @@
         .container.full-width { max-width: 95%; }
         h1, h2 { color: var(--primary-color); border-bottom: 2px solid var(--border-color); padding-bottom: 10px; display: flex; align-items: center; gap: 10px; }
         h1 { justify-content: space-between; }
+        .version-info { font-size: 0.5em; color: var(--text-color); font-weight: normal; }
         .section-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 2px solid var(--border-color); }
         .section-header h2 { border-bottom: none; padding-bottom: 0; margin: 0; }
         .m3u-url { background-color: var(--border-color); padding: 5px 10px; border-radius: 6px; font-size: 0.9em; display: flex; align-items: center; gap: 8px; }
@@ -69,7 +70,15 @@
 </head>
 <body>
     <div class="container">
-        <h1><span><i class="fa-solid fa-network-wired"></i> Roku Bridge Status & Config</span><div class="view-toggle"><label for="fullscreen-toggle">Full Width</label><label class="switch"><input type="checkbox" id="fullscreen-toggle"><span class="slider round"></span></label></div></h1>
+        <h1>
+            <span><i class="fa-solid fa-network-wired"></i> Roku Bridge Status & Config <span class="version-info">v{{ global_settings.app_version }}</span></span>
+            <div class="view-toggle">
+                <label for="fullscreen-toggle">Full Width</label>
+                <label class="switch">
+                    <input type="checkbox" id="fullscreen-toggle"><span class="slider round"></span>
+                </label>
+            </div>
+        </h1>
         <button class="button" onclick="fetchStatus()"><i class="fa-solid fa-sync"></i> Refresh Status</button>
         <div class="table-wrapper"><table id="status-table"><thead><tr><th>Tuner Name</th><th>Roku IP</th><th>Encoder URL</th><th style="text-align: center;">Status</th></tr></thead><tbody id="status-table-body"></tbody></table></div>
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-globe"></i> Global Settings</h2></div>
