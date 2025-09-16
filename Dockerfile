@@ -1,5 +1,5 @@
 # Use a more modern and supported Python runtime as a parent image
-FROM python:3.9-slim-bullseye
+FROM python:3.13-slim-bullseye
 
 # Set the working directory in the container
 WORKDIR /app
@@ -40,4 +40,5 @@ COPY static/ /app/static/
 EXPOSE 5000
 
 # Run the application with a single worker to ensure config reloads work correctly
+
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--worker-class", "gevent", "--workers", "1", "--timeout", "0", "app:app"]
