@@ -1,6 +1,6 @@
 # **Roku Channels Bridge**
 
-**Release: Beta 3.1**
+**Release: Beta 3.2**
 
 [**Official Configuration Guide**](https://tuner.ct.ws)
 
