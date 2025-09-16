@@ -19,7 +19,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -524,4 +524,5 @@ def api_status():
 
 if __name__ != '__main__':
     load_config()
+
     ENCODER_SETTINGS = get_encoder_options()
