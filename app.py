@@ -6,7 +6,7 @@ import os
 import requests
 import time
 import threading
-import httpx
+import httpx # httpx is still used for the silent stream, but not for the main proxy
 import urllib.parse
 import signal
 from collections import deque
@@ -19,7 +19,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.1-stream" # Updated Version
+APP_VERSION = "4.2-stream" # Updated Version
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -105,21 +105,15 @@ def lock_tuner():
                 return tuner
     return None
 
-# --- THIS IS THE FIX: Centralized Cleanup Logic ---
 def release_tuner(tuner_ip):
-    # Stop any associated keep-alive tasks first
     if tuner_ip in KEEP_ALIVE_TASKS:
         thread, stop_event = KEEP_ALIVE_TASKS.pop(tuner_ip)
         stop_event.set()
         thread.join(timeout=5)
-    
-    # Check if this tuner was part of the preview session and reset if so
     with SESSION_LOCK:
         if PREVIEW_SESSION['tuner'] and PREVIEW_SESSION['tuner']['roku_ip'] == tuner_ip:
             PREVIEW_SESSION.update({'tuner': None, 'active': False, 'committed': False})
             logging.info(f"Cleared preview session associated with tuner {tuner_ip}")
-
-    # Release the tuner from the main pool
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
@@ -198,6 +192,7 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
             while time.time() - start_time < blank_duration:
                 yield SILENT_TS_PACKET
                 time.sleep(0.1)
+
         if mode in ['remux', 'reencode']:
             command = ['ffmpeg', '-i', encoder_url]
             if mode == 'reencode':
@@ -209,8 +204,11 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
             for chunk in iter(lambda: process.stdout.read(8192), b''): yield chunk
             process.wait()
         else: # Proxy
-            with httpx.stream("GET", encoder_url, timeout=15, follow_redirects=True) as r:
-                for chunk in r.iter_bytes(): yield chunk
+            # --- THIS IS THE FIX: Use requests library for consistency ---
+            with requests.get(encoder_url, timeout=15, stream=True, allow_redirects=True) as r:
+                r.raise_for_status() # Fail loudly if the encoder gives an error
+                for chunk in r.iter_content(chunk_size=8192):
+                    yield chunk
     except Exception as e:
         logging.error(f"Stream error for {roku_ip_to_release} ({mode}): {e}")
     finally:
@@ -231,7 +229,6 @@ def stop_preview_session():
     with SESSION_LOCK:
         tuner = PREVIEW_SESSION.get('tuner')
     if tuner:
-        # Call the centralized release function which will also reset the session
         release_tuner(tuner['roku_ip'])
 
 def commit_preview_session():
@@ -270,11 +267,9 @@ def stream_ondemand():
         if not PREVIEW_SESSION['committed'] or not PREVIEW_SESSION['tuner']:
             return "No pre-tuned stream is ready. Please select content from the Pre-Tune page.", 404
         tuner = PREVIEW_SESSION['tuner']
-        # The session is NOT reset here anymore. It's reset when the tuner is released.
     
     logging.info(f"Channels DVR connected to committed stream from tuner {tuner['name']}")
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
-    # The stream_generator will call release_tuner in its 'finally' block, which now cleans up the session.
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
