@@ -19,7 +19,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.0-stream"
+APP_VERSION = "4.1-stream" # Updated Version
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -105,19 +105,31 @@ def lock_tuner():
                 return tuner
     return None
 
+# --- THIS IS THE FIX: Centralized Cleanup Logic ---
 def release_tuner(tuner_ip):
+    # Stop any associated keep-alive tasks first
     if tuner_ip in KEEP_ALIVE_TASKS:
         thread, stop_event = KEEP_ALIVE_TASKS.pop(tuner_ip)
         stop_event.set()
         thread.join(timeout=5)
+    
+    # Check if this tuner was part of the preview session and reset if so
+    with SESSION_LOCK:
+        if PREVIEW_SESSION['tuner'] and PREVIEW_SESSION['tuner']['roku_ip'] == tuner_ip:
+            PREVIEW_SESSION.update({'tuner': None, 'active': False, 'committed': False})
+            logging.info(f"Cleared preview session associated with tuner {tuner_ip}")
+
+    # Release the tuner from the main pool
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
                 if tuner['in_use']:
                     tuner['in_use'] = False
                     if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name')}")
-                    try: roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
-                    except requests.exceptions.RequestException: pass
+                    try: 
+                        roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
+                    except requests.exceptions.RequestException: 
+                        pass
                 break
 
 def send_key_sequence(device_ip, keys):
@@ -217,19 +229,17 @@ def start_preview_session():
 
 def stop_preview_session():
     with SESSION_LOCK:
-        if PREVIEW_SESSION['active'] and not PREVIEW_SESSION['committed']:
-            tuner = PREVIEW_SESSION['tuner']
-            if tuner:
-                logging.info(f"Stopping and releasing unused preview session on tuner {tuner['name']}")
-                release_tuner(tuner['roku_ip'])
-        PREVIEW_SESSION.update({'tuner': None, 'active': False, 'committed': False})
+        tuner = PREVIEW_SESSION.get('tuner')
+    if tuner:
+        # Call the centralized release function which will also reset the session
+        release_tuner(tuner['roku_ip'])
 
 def commit_preview_session():
     with SESSION_LOCK:
         if not PREVIEW_SESSION['active'] or not PREVIEW_SESSION['tuner']:
             return {"status": "error", "message": "No active preview session to commit."}
         PREVIEW_SESSION['committed'] = True
-        logging.info(f"Committed preview session for tuner {PREVIEW_SESSION['tuner']['name']}. It is now locked for Channels DVR.")
+        logging.info(f"Committed preview session for tuner {PREVIEW_SESSION['tuner']['name']}. It is now ready for Channels DVR.")
         return {"status": "success", "message": "Stream is now ready for Channels DVR."}
 
 @app.route('/stream/<channel_id>')
@@ -260,9 +270,11 @@ def stream_ondemand():
         if not PREVIEW_SESSION['committed'] or not PREVIEW_SESSION['tuner']:
             return "No pre-tuned stream is ready. Please select content from the Pre-Tune page.", 404
         tuner = PREVIEW_SESSION['tuner']
-        PREVIEW_SESSION.update({'tuner': None, 'active': False, 'committed': False})
+        # The session is NOT reset here anymore. It's reset when the tuner is released.
+    
     logging.info(f"Channels DVR connected to committed stream from tuner {tuner['name']}")
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
+    # The stream_generator will call release_tuner in its 'finally' block, which now cleans up the session.
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
@@ -361,7 +373,6 @@ def api_pretune_commit():
     status_code = 200 if result['status'] == 'success' else 409
     return jsonify(result), status_code
 
-# --- NEW: Proxy stream for the pre-tune page to avoid CORS issues ---
 @app.route('/api/pretune/stream')
 def api_pretune_stream():
     with SESSION_LOCK:
@@ -369,16 +380,12 @@ def api_pretune_stream():
             return "No active preview session.", 404
         tuner = PREVIEW_SESSION['tuner']
         encoder_url = tuner['encoder_url']
-        roku_ip = tuner['roku_ip'] # We don't release the tuner, it's just for the generator
-    
-    # We use a simple proxy here; the main stream_generator handles release logic
     try:
         req = requests.get(encoder_url, stream=True, timeout=10)
         return Response(stream_with_context(req.iter_content(chunk_size=8192)), content_type=req.headers['content-type'])
     except Exception as e:
         logging.error(f"Error proxying pretune stream from {encoder_url}: {e}")
         return "Failed to connect to encoder.", 500
-
 
 @app.route('/remote/launch/<device_ip>/<app_id>', methods=['POST'])
 def remote_launch(device_ip, app_id):
@@ -390,7 +397,6 @@ def remote_launch(device_ip, app_id):
 
 @app.route('/remote/keypress/<device_ip>/<key>', methods=['POST'])
 def remote_keypress(device_ip, key):
-    # This check is important now that the IP comes from the client
     if not any(t['roku_ip'] == device_ip for t in TUNERS) and (not PREVIEW_SESSION['tuner'] or PREVIEW_SESSION['tuner']['roku_ip'] != device_ip):
         return jsonify({"status": "error", "message": "Device not found or not locked for preview."}), 404
     try:
