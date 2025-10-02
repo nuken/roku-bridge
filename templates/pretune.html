@@ -28,17 +28,14 @@
             background-color: var(--border-color); color: var(--text-color); font-size: 1em;
             margin-bottom: 15px; -webkit-appearance: none; appearance: none;
         }
-        #send-to-channels {
+        #send-to-channels, #stop-session {
              width: 100%; padding: 15px; border-radius: 12px; border: none; font-size: 1.2em;
-             background-color: var(--success-color); color: white; cursor: pointer;
+             color: white; cursor: pointer; margin-top: 10px;
         }
-        .remote-overlay {
-            position: absolute; bottom: 0; left: 0; right: 0; padding: 15px;
-            background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0));
-            display: flex; justify-content: space-around; align-items: center;
-            opacity: 0; transition: opacity 0.3s; pointer-events: none;
-        }
-        .video-wrapper:hover .remote-overlay, .remote-overlay.active { opacity: 1; pointer-events: auto; }
+        #send-to-channels { background-color: var(--success-color); }
+        #stop-session { background-color: var(--error-color); }
+
+        /* --- Remote Styles --- */
         .remote-button {
             background-color: var(--button-color); color: #fff; border: none;
             border-radius: 50%; width: 60px; height: 60px; font-size: 1.5em;
@@ -47,18 +44,47 @@
         }
         .remote-button:active { transform: scale(0.95); background-color: #777; }
         #button-ok { background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; }
+        .full-remote { display: none; } /* Hidden on mobile by default */
+        .grid-container { display: grid; gap: 15px; margin-top: 20px; }
+        .button-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; justify-items: center; }
+        .d-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 15px; }
+        .d-pad .remote-button { border-radius: 15px; }
+        #full-remote-up { grid-area: 1 / 2 / 2 / 3; }
+        #full-remote-left { grid-area: 2 / 1 / 3 / 2; }
+        #full-remote-ok { grid-area: 2 / 2 / 3 / 3; background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; font-size: 1.2em; }
+        #full-remote-right { grid-area: 2 / 3 / 3 / 4; }
+        #full-remote-down { grid-area: 3 / 2 / 4 / 3; }
+
+        /* --- Mobile Remote Overlay --- */
+        .remote-overlay {
+            position: absolute; bottom: 0; left: 0; right: 0; padding: 15px;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0));
+            display: grid; grid-template-areas: ". up ." "left ok right" ". down .";
+            grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+            gap: 10px; justify-items: center; align-items: center;
+            opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        }
+        #button-up-overlay { grid-area: up; }
+        #button-left-overlay { grid-area: left; }
+        #button-ok-overlay { grid-area: ok; }
+        #button-right-overlay { grid-area: right; }
+        #button-down-overlay { grid-area: down; }
+        #button-back-overlay { position: absolute; top: 20px; left: 20px; }
+        .video-wrapper:hover .remote-overlay, .remote-overlay.active { opacity: 1; pointer-events: auto; }
+
         .notification {
             position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px;
             border-radius: 8px; z-index: 1001; color: white; opacity: 0; transition: opacity 0.5s, top 0.5s;
         }
         .notification.show { opacity: 1; top: 30px; }
         
-        /* Desktop Layout */
+        /* --- Desktop Layout --- */
         @media (min-width: 769px) {
             .pretune-container { flex-direction: row; }
             .controls-wrapper { width: 30%; max-width: 400px; overflow-y: auto; }
             .video-wrapper { width: 70%; }
-            .remote-overlay { display: none; }
+            .remote-overlay { display: none; } /* Hide mobile overlay */
+            .full-remote { display: block; } /* Show desktop remote */
         }
     </style>
 </head>
@@ -74,18 +100,43 @@
                     {% endfor %}
                 </select>
              </div>
+
+             <div class="full-remote">
+                <div class="grid-container">
+                    <div class="button-row">
+                        <button class="remote-button" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                        <button class="remote-button" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
+                        <button class="remote-button" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
+                    </div>
+                    <div class="d-pad">
+                        <button class="remote-button" id="full-remote-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                        <button class="remote-button" id="full-remote-left" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                        <button class="remote-button" id="full-remote-ok" onclick="sendKey('Select')">OK</button>
+                        <button class="remote-button" id="full-remote-right" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                        <button class="remote-button" id="full-remote-down" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+                    </div>
+                    <div class="button-row">
+                        <button class="remote-button" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
+                        <button class="remote-button" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                        <button class="remote-button" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
+                    </div>
+                </div>
+             </div>
              <button id="send-to-channels" onclick="sendToChannels()">Send to Channels DVR</button>
-        </div>
+             <button id="stop-session" onclick="stopSession()">Stop Session & Release Tuner</button>
+             </div>
 
         <div class="video-wrapper">
             <video id="video-player" autoplay muted playsinline></video>
             <div class="remote-overlay">
-                 <button class="remote-button" id="button-back" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
-                 <button class="remote-button" id="button-left" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
-                 <button class="remote-button" id="button-ok" onclick="sendKey('Select')">OK</button>
-                 <button class="remote-button" id="button-right" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                 <button class="remote-button" id="button-back-overlay" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                 <button class="remote-button" id="button-up-overlay" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                 <button class="remote-button" id="button-left-overlay" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                 <button class="remote-button" id="button-ok-overlay" onclick="sendKey('Select')">OK</button>
+                 <button class="remote-button" id="button-right-overlay" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                 <button class="remote-button" id="button-down-overlay" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
             </div>
-        </div>
+            </div>
     </div>
     <div id="notification-area"></div>
 
@@ -111,6 +162,7 @@
                 player.destroy();
                 player = null;
             }
+            videoElement.src = ""; // Clear the video element
         }
 
         async function startPreviewStream() {
@@ -121,17 +173,10 @@
 
                 if (response.ok) {
                     activeTunerIp = data.roku_ip;
-                    
-                    // --- THIS IS THE FIX ---
-                    // Connect to the proxy URL on our server, not the direct encoder URL
                     const streamUrl = '/api/pretune/stream';
 
                     if (mpegts.isSupported()) {
-                        player = mpegts.createPlayer({
-                            type: 'mpegts',
-                            isLive: true,
-                            url: streamUrl
-                        });
+                        player = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: streamUrl });
                         player.attachMediaElement(videoElement);
                         player.load();
                         player.play();
@@ -168,9 +213,7 @@
             }
             try {
                 await fetch(`/remote/keypress/${activeTunerIp}/${encodeURIComponent(key)}`, { method: 'POST' });
-            } catch (error) {
-                console.error(`Failed to send key ${key}:`, error);
-            }
+            } catch (error) { console.error(`Failed to send key ${key}:`, error); }
         }
         
         async function sendToChannels() {
@@ -186,13 +229,27 @@
                     cleanupPlayer();
                     activeTunerIp = null;
                     document.getElementById('app-launcher').value = '';
-                 } else {
-                    throw new Error(data.error || 'Failed to send to Channels');
-                 }
-            } catch(error) {
-                 showNotification(error.message, 'error');
+                 } else { throw new Error(data.error || 'Failed to send to Channels'); }
+            } catch(error) { showNotification(error.message, 'error'); }
+        }
+
+        // ====== NEW: Stop Session Function ======
+        async function stopSession() {
+            cleanupPlayer();
+            if (activeTunerIp) {
+                try {
+                    await fetch('/api/pretune/stop', { method: 'POST' });
+                    showNotification('Session stopped and tuner released.', 'success');
+                    activeTunerIp = null;
+                    document.getElementById('app-launcher').value = '';
+                } catch(error) {
+                    showNotification('Failed to stop session.', 'error');
+                }
+            } else {
+                showNotification('No active session to stop.', 'info');
             }
         }
+        // =====================================
 
         window.addEventListener('beforeunload', () => {
             cleanupPlayer();
