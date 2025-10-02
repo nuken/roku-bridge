@@ -19,7 +19,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.0-stream" # Updated Version
+APP_VERSION = "4.0-stream"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -65,8 +65,8 @@ AUDIO_CHANNELS = get_audio_channels()
 TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS = [], [], [], []
 TUNER_LOCK = threading.Lock()
 KEEP_ALIVE_TASKS = {}
-PREVIEW_SESSION = {'tuner': None, 'active': False, 'committed': False} # For the new pre-tune feature
-SESSION_LOCK = threading.Lock() # To manage the preview session safely
+PREVIEW_SESSION = {'tuner': None, 'active': False, 'committed': False}
+SESSION_LOCK = threading.Lock()
 
 roku_session = requests.Session()
 roku_session.timeout = 3
@@ -90,7 +90,7 @@ def load_config():
         for tuner in TUNERS: tuner['in_use'] = False
         CHANNELS = config_data.get('channels', [])
         EPG_CHANNELS = config_data.get('epg_channels', [])
-        ONDEMAND_APPS = config_data.get('ondemand_apps', []) # Load new on-demand apps
+        ONDEMAND_APPS = config_data.get('ondemand_apps', [])
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
     except Exception as e:
@@ -121,32 +121,96 @@ def release_tuner(tuner_ip):
                 break
 
 def send_key_sequence(device_ip, keys):
-    # (Existing function remains unchanged)
-    ...
+    for key in keys:
+        try:
+            if isinstance(key, dict) and 'wait' in key:
+                time.sleep(float(key['wait']))
+                continue
+            if isinstance(key, str) and key.lower().startswith('wait='):
+                try:
+                    duration = float(key.split('=')[1])
+                    time.sleep(duration)
+                    continue
+                except (ValueError, IndexError):
+                    logging.error(f"Invalid wait command: {key}")
+                    continue
+            safe_key = f"Lit_{urllib.parse.quote(key)}" if len(key) == 1 else key
+            roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
+            if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
+            time.sleep(0.5)
+        except Exception as e:
+            logging.error(f"Failed to send key '{key}' to {device_ip}: {e}")
+            return False
+    return True
 
 def keep_alive_sender(roku_ip, key_string, interval_minutes, stop_event):
-    # (Existing function remains unchanged)
-    ...
+    keys = [k.strip() for k in key_string.split(',')]
+    interval_seconds = interval_minutes * 60
+    while not stop_event.wait(interval_seconds):
+        try:
+            logging.info(f"[Keep-Alive] Sending sequence {keys} to {roku_ip} to prevent timeout.")
+            send_key_sequence(roku_ip, keys)
+        except Exception as e:
+            logging.error(f"[Keep-Alive] Error sending key sequence to {roku_ip}: {e}")
 
 def execute_tuning_in_background(roku_ip, channel_data):
-    # (Existing function remains unchanged)
-    ...
+    try:
+        if DEBUG_LOGGING_ENABLED: logging.info(f"Tuning to actual channel {channel_data['name']}...")
+        launch_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
+        roku_session.post(launch_url)
+        time.sleep(channel_data.get("tune_delay", 1))
+        plugin_script = channel_data.get('plugin_script')
+        key_sequence = channel_data.get('key_sequence')
+        if plugin_script and plugin_script in discovered_plugins:
+            plugin = discovered_plugins[plugin_script]
+            final_sequence = plugin.tune_channel(roku_ip, channel_data)
+            if final_sequence: send_key_sequence(roku_ip, final_sequence)
+        elif key_sequence:
+            send_key_sequence(roku_ip, key_sequence)
+        else:
+            content_id = channel_data.get('deep_link_content_id')
+            if content_id:
+                media_type = channel_data.get('media_type', 'live')
+                params = f"?contentId={content_id}&mediaType={media_type}"
+                roku_session.post(f"{launch_url}{params}")
+        if channel_data.get('needs_select_keypress'):
+            time.sleep(1)
+            send_key_sequence(roku_ip, ["Select"])
+    except Exception as e:
+        logging.error(f"Error during background tuning for {roku_ip}: {e}")
 
 def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_duration=0):
-    # (Existing function remains unchanged)
-    ...
-
-# --- New Pre-Tune Session Management ---
+    try:
+        if blank_duration > 0:
+            start_time = time.time()
+            while time.time() - start_time < blank_duration:
+                yield SILENT_TS_PACKET
+                time.sleep(0.1)
+        if mode in ['remux', 'reencode']:
+            command = ['ffmpeg', '-i', encoder_url]
+            if mode == 'reencode':
+                command.extend(['-c:v', 'copy', '-c:a', 'aac', '-b:a', AUDIO_BITRATE, '-ac', AUDIO_CHANNELS])
+            else:
+                command.extend(['-c', 'copy'])
+            command.extend(['-f', 'mpegts', '-loglevel', 'error', '-'])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for chunk in iter(lambda: process.stdout.read(8192), b''): yield chunk
+            process.wait()
+        else: # Proxy
+            with httpx.stream("GET", encoder_url, timeout=15, follow_redirects=True) as r:
+                for chunk in r.iter_bytes(): yield chunk
+    except Exception as e:
+        logging.error(f"Stream error for {roku_ip_to_release} ({mode}): {e}")
+    finally:
+        release_tuner(roku_ip_to_release)
 
 def start_preview_session():
     with SESSION_LOCK:
         if PREVIEW_SESSION['active']:
             return {"status": "error", "message": "A preview session is already active."}
-
         tuner = lock_tuner()
         if not tuner:
             return {"status": "error", "message": "All tuners are in use."}
-
         PREVIEW_SESSION.update({'tuner': tuner, 'active': True, 'committed': False})
         logging.info(f"Started preview session on tuner {tuner['name']}")
         return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip'], "encoder_url": tuner['encoder_url']}
@@ -168,47 +232,60 @@ def commit_preview_session():
         logging.info(f"Committed preview session for tuner {PREVIEW_SESSION['tuner']['name']}. It is now locked for Channels DVR.")
         return {"status": "success", "message": "Stream is now ready for Channels DVR."}
 
-# --- Main Flask Routes ---
-
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
-    # (Existing route remains unchanged)
-    ...
+    is_preview = request.args.get('preview', 'false').lower() == 'true'
+    locked_tuner = lock_tuner()
+    if not locked_tuner: return "All tuners are in use.", 503
+    channel_data = next((c for c in CHANNELS + EPG_CHANNELS if c["id"] == channel_id), None)
+    if not channel_data:
+        release_tuner(locked_tuner['roku_ip'])
+        return "Channel not found.", 404
+    executor.submit(execute_tuning_in_background, locked_tuner['roku_ip'], channel_data)
+    if channel_data.get('keep_alive_enabled') and channel_data.get('keep_alive_key'):
+        interval = channel_data.get('keep_alive_interval', 225)
+        stop_event = threading.Event()
+        thread = threading.Thread(target=keep_alive_sender, args=(locked_tuner['roku_ip'], channel_data['keep_alive_key'], interval, stop_event))
+        thread.daemon = True
+        thread.start()
+        KEEP_ALIVE_TASKS[locked_tuner['roku_ip']] = (thread, stop_event)
+    tuner_mode = locked_tuner.get('encoding_mode', ENCODING_MODE)
+    blank_duration = 0 if is_preview else channel_data.get('blank_duration', 0)
+    generator = stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'], tuner_mode, blank_duration)
+    return Response(stream_with_context(generator), mimetype='video/mpeg')
 
-# --- NEW: On-Demand Streaming Endpoint ---
 @app.route('/stream/ondemand_stream')
 def stream_ondemand():
-    """Waits for a committed pre-tuned stream and serves it."""
     with SESSION_LOCK:
         if not PREVIEW_SESSION['committed'] or not PREVIEW_SESSION['tuner']:
             return "No pre-tuned stream is ready. Please select content from the Pre-Tune page.", 404
-
         tuner = PREVIEW_SESSION['tuner']
-        # Reset the session for the next user
         PREVIEW_SESSION.update({'tuner': None, 'active': False, 'committed': False})
-
     logging.info(f"Channels DVR connected to committed stream from tuner {tuner['name']}")
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
-# --- M3U Routes ---
-
 def generate_m3u_from_channels(channel_list):
-    # (Existing function remains unchanged)
-    ...
+    m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
+    for channel in channel_list:
+        stream_url = f"http://{request.host}/stream/{channel['id']}"
+        extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
+        tags = { "tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo", "tvc-guide-stationid": "tvc_guide_stationid" }
+        for tag, key in tags.items():
+            if key in channel: extinf_line += f' {tag}="{channel[key]}"'
+        extinf_line += f',{channel["name"]}'
+        m3u_content.extend([extinf_line, stream_url])
+    return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
 @app.route('/channels.m3u')
 def generate_gracenote_m3u():
-    # (Existing function remains unchanged)
-    ...
+    return generate_m3u_from_channels(CHANNELS)
 
 @app.route('/epg_channels.m3u')
 def generate_epg_m3u():
-    # (Existing function remains unchanged)
-    ...
+    return generate_m3u_from_channels(EPG_CHANNELS)
 
-# --- NEW: On-Demand M3U ---
 @app.route('/ondemand.m3u')
 def generate_ondemand_m3u():
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
@@ -217,41 +294,39 @@ def generate_ondemand_m3u():
     m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
-# --- UI and API Routes ---
-
 @app.route('/')
 def index():
     return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a> | <a href='/preview'>Live TV Preview</a> | <a href='/pretune'>On-Demand Pre-Tune</a>"
 
 @app.route('/remote')
 def remote_control():
-    # (Existing route remains unchanged)
-    ...
+    return render_template('remote.html')
 
 @app.route('/preview')
 def preview():
-    # (Existing route remains unchanged)
-    ...
+    all_channels = sorted(CHANNELS + EPG_CHANNELS, key=lambda x: x.get('name', '').lower())
+    return render_template('preview.html', channels=all_channels)
 
-# --- NEW: Pre-Tune Page Route ---
 @app.route('/pretune')
 def pretune_page():
-    """Renders the new pre-tuning page."""
     return render_template('pretune.html', ondemand_apps=ONDEMAND_APPS)
 
 @app.route('/status')
 def status_page():
-    # (Existing route remains unchanged)
-    ...
-
-# --- API Endpoints ---
+    settings = {
+        'encoding_mode': ENCODING_MODE,
+        'audio_bitrate': AUDIO_BITRATE,
+        'audio_channels': os.getenv('AUDIO_CHANNELS', '2'),
+        'debug_logging': DEBUG_LOGGING_ENABLED,
+        'app_version': APP_VERSION
+    }
+    return render_template('status.html', global_settings=settings)
 
 @app.route('/api/config', methods=['GET', 'POST'])
 def api_config():
     if request.method == 'POST':
         try:
             new_config = request.get_json()
-            # Add ondemand_apps to validation
             if not all(k in new_config for k in ['tuners', 'channels', 'epg_channels', 'ondemand_apps']):
                 return jsonify({"error": "Invalid configuration structure."}), 400
             with open(CONFIG_FILE_PATH, 'w') as f: json.dump(new_config, f, indent=2)
@@ -269,7 +344,6 @@ def api_config():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-# --- NEW: Pre-Tune API ---
 @app.route('/api/pretune/start', methods=['POST'])
 def api_pretune_start():
     result = start_preview_session()
@@ -287,19 +361,50 @@ def api_pretune_commit():
     status_code = 200 if result['status'] == 'success' else 409
     return jsonify(result), status_code
 
-# --- Other Remote and Status APIs ---
-
 @app.route('/remote/launch/<device_ip>/<app_id>', methods=['POST'])
 def remote_launch(device_ip, app_id):
-    """New endpoint to launch an app, used by pretune page."""
     try:
         roku_session.post(f"http://{device_ip}:8060/launch/{app_id}")
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# Add other existing routes like /api/status, /remote/keypress, etc.
-# ... (The rest of your app.py file remains the same)
+@app.route('/remote/keypress/<device_ip>/<key>', methods=['POST'])
+def remote_keypress(device_ip, key):
+    if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
+    try:
+        roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}")
+        return jsonify({"status": "success"})
+    except requests.exceptions.RequestException as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/remote/devices')
+def get_remote_devices():
+    return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
+
+@app.route('/api/status')
+def api_status():
+    statuses = []
+    def check_tuner_status(tuner):
+        roku_ip = tuner['roku_ip']
+        encoder_url = tuner['encoder_url']
+        roku_status = 'offline'
+        encoder_status = 'offline'
+        try:
+            roku_session.get(f"http://{roku_ip}:8060", timeout=3)
+            roku_status = 'online'
+        except requests.exceptions.RequestException: pass
+        try:
+            with requests.get(encoder_url, timeout=5, stream=True, allow_redirects=True) as response:
+                response.raise_for_status()
+                if next(response.iter_content(1), None):
+                    encoder_status = 'online'
+        except requests.exceptions.RequestException: pass
+        return { "name": tuner.get("name", roku_ip), "roku_ip": roku_ip, "encoder_url": encoder_url, "roku_status": roku_status, "encoder_status": encoder_status }
+    with ThreadPoolExecutor(max_workers=len(TUNERS) or 1) as status_executor:
+        statuses = list(status_executor.map(check_tuner_status, TUNERS))
+    tuner_configs = [{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"], "encoder_url": t["encoder_url"]} for t in TUNERS]
+    return jsonify({"tuners": tuner_configs, "statuses": statuses})
 
 if __name__ != '__main__':
     load_config()

@@ -7,11 +7,103 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 	<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <style>
-        /* (Existing styles remain unchanged) */
+        :root { --bg-color: #2c2c2c; --surface-color: #3a3a3a; --primary-color: #7dd3fc; --text-color: #e0e0e0; --border-color: #4a4a4a; --success-color: #28a745; --error-color: #dc3545; --button-color: #007bff; --button-hover-color: #0056b3; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background-color: var(--surface-color); border-radius: 20px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); transition: max-width 0.3s ease-in-out; }
+        .container.full-width { max-width: 95%; }
+        h1, h2 { color: var(--primary-color); border-bottom: 2px solid var(--border-color); padding-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+        h1 { justify-content: space-between; }
+        .version-info { font-size: 0.5em; color: var(--text-color); font-weight: normal; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 2px solid var(--border-color); }
+        .section-header h2 { border-bottom: none; padding-bottom: 0; margin: 0; }
+        .m3u-url { background-color: var(--border-color); padding: 5px 10px; border-radius: 6px; font-size: 0.9em; display: flex; align-items: center; gap: 8px; }
+        .m3u-url a { color: var(--primary-color); text-decoration: none; }
+        .m3u-url a:hover { text-decoration: underline; }
+        .copy-button { padding: 4px 8px; font-size: 0.8em; }
+        .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; margin-top: 20px; max-height: 400px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 600px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        th { background-color: var(--border-color); position: sticky; top: 0; z-index: 1; }
+        .status-icon .fa-check-circle { color: var(--success-color); } .status-icon .fa-times-circle { color: var(--error-color); } .status-icon .fa-spinner { color: var(--primary-color); animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .button, .action-button { background-color: var(--button-color); color: white; padding: 10px 15px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; transition: background-color 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .button:hover, .action-button:hover { background-color: var(--button-hover-color); }
+        .action-button { font-size: 0.9em; padding: 6px 10px; }
+        .action-button.edit { background-color: #ffc107; } .action-button.delete { background-color: var(--error-color); }
+        .action-button.edit:hover { background-color: #d39e00; } .action-button.delete:hover { background-color: #b22222; }
+        .nav-links { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color); }
+        .nav-links a { color: var(--primary-color); text-decoration: none; margin: 0 15px; font-size: 1.1em; }
+        .global-settings, .backup-restore { background-color: #222; padding: 15px; border-radius: 8px; margin-top: 20px; }
+        .global-settings p { margin: 5px 0; } .global-settings code { background-color: var(--border-color); padding: 2px 5px; border-radius: 4px; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6); }
+        .modal-content { background-color: var(--surface-color); margin: 5% auto; padding: 20px; border-radius: 12px; width: 90%; max-width: 600px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); max-height: 90vh; display: flex; flex-direction: column; }
+        .modal-body { overflow-y: auto; padding-right: 15px; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 20px; }
+        .modal-header h3 { margin: 0; color: var(--primary-color); }
+        .close-button { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: flex; align-items: center; margin-bottom: 5px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background-color: var(--border-color); color: var(--text-color); font-size: 1em; box-sizing: border-box; }
+        .form-group-checkbox { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+        .form-group-checkbox input { width: auto; }
+        #save-all-button { background-color: var(--success-color); width: 100%; padding: 15px; font-size: 1.2em; margin-top: 20px; }
+        #save-all-button:hover { background-color: #218838; }
+        .notification { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: 8px; z-index: 1001; color: white; opacity: 0; transition: opacity 0.5s, top 0.5s; }
+        .notification.show { opacity: 1; top: 30px; }
+        .optional-field-controls { display: flex; gap: 10px; margin-top: 20px; }
+        .optional-field-controls select { flex-grow: 1; background-color: #222; border-radius: 8px; color: var(--text-color); padding: 10px; border: 1px solid #555; }
+        .dynamic-field { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+        .dynamic-field .form-group { flex-grow: 1; margin-bottom: 0; }
+        .view-toggle { display: flex; align-items: center; gap: 10px; font-size: 0.6em; font-weight: normal; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; transition: .4s; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; }
+        input:checked + .slider { background-color: var(--primary-color); }
+        input:focus + .slider { box-shadow: 0 0 1px var(--primary-color); }
+        input:checked + .slider:before { transform: translateX(22px); }
+        .slider.round { border-radius: 28px; } .slider.round:before { border-radius: 50%; }
+        .tooltip { position: relative; display: inline-block; margin-left: 8px; cursor: help; color: var(--primary-color); }
+        .tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #555; color: #fff; text-align: center; border-radius: 6px; padding: 5px; position: absolute; z-index: 1001; bottom: 125%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s, visibility 0.3s; }
+        .tooltip .tooltiptext.visible { visibility: visible; opacity: 1; }
     </style>
 </head>
 <body>
     <div class="container">
+        <h1>
+            <span><i class="fa-solid fa-network-wired"></i> Roku Bridge Status & Config <span class="version-info">v{{ global_settings.app_version }}</span></span>
+            <div class="view-toggle">
+                <label for="fullscreen-toggle">Full Width</label>
+                <label class="switch">
+                    <input type="checkbox" id="fullscreen-toggle"><span class="slider round"></span>
+                </label>
+            </div>
+        </h1>
+        <button class="button" onclick="fetchStatus()"><i class="fa-solid fa-sync"></i> Refresh Status</button>
+        <div class="table-wrapper"><table id="status-table"><thead><tr><th>Tuner Name</th><th>Roku IP</th><th>Encoder URL</th><th style="text-align: center;">Status</th></tr></thead><tbody id="status-table-body"></tbody></table></div>
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-globe"></i> Global Settings</h2></div>
+        <div class="global-settings">
+            <p>These settings are configured at startup and cannot be changed here.</p>
+            <p><strong>Default Encoding Mode:</strong> <code>{{ global_settings.encoding_mode }}</code></p>
+            <p><strong>Audio Bitrate:</strong> <code>{{ global_settings.audio_bitrate }}</code></p>
+            <p><strong>Audio Channels:</strong> <code>{{ global_settings.audio_channels }}</code></p>
+            <p>
+                <strong>Debug Logging:</strong> <code>{{ 'Enabled' if global_settings.debug_logging else 'Disabled' }}</code>
+                {% if global_settings.debug_logging %}
+                    <a href="/logs" style="margin-left: 15px; color: var(--primary-color); text-decoration: none;">(View Logs)</a>
+                {% endif %}
+            </p>
+        </div>
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-satellite-dish"></i> Tuners</h2></div>
+        <div class="table-wrapper"><table id="tuners-table"><thead><tr><th>Name</th><th>Roku IP</th><th>Encoder URL</th><th>Priority</th><th>Encoding Mode</th><th>Actions</th></tr></thead><tbody id="tuners-table-body"></tbody></table></div>
+        <button class="button" onclick="openTunerModal()"><i class="fa-solid fa-plus"></i> Add Tuner</button>
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-tv"></i> Gracenote Channels</h2><span class="m3u-url">M3U: <a id="gracenote-m3u-url" href="/channels.m3u" target="_blank">/channels.m3u</a><button class="action-button copy-button" title="Copy full URL" onclick="copyToClipboard('gracenote-m3u-url')"><i class="fa-solid fa-copy"></i></button></span></div>
+        <div class="table-wrapper"><table id="channels-table"><thead><tr><th>Name</th><th>ID</th><th>App ID</th><th>Station ID</th><th>Actions</th></tr></thead><tbody id="channels-table-body"></tbody></table></div>
+        <button class="button" onclick="openChannelModal('gracenote')"><i class="fa-solid fa-plus"></i> Add Gracenote Channel</button>
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-list-alt"></i> Custom EPG Channels</h2><span class="m3u-url">M3U: <a id="epg-m3u-url" href="/epg_channels.m3u" target="_blank">/epg_channels.m3u</a><button class="action-button copy-button" title="Copy full URL" onclick="copyToClipboard('epg-m3u-url')"><i class="fa-solid fa-copy"></i></button></span></div>
+        <div class="table-wrapper"><table id="epg-channels-table"><thead><tr><th>Name</th><th>ID</th><th>App ID</th><th>Channel #</th><th>Actions</th></tr></thead><tbody id="epg-channels-table-body"></tbody></table></div>
+        <button class="button" onclick="openChannelModal('epg')"><i class="fa-solid fa-plus"></i> Add EPG Channel</button>
+
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
             <h2><i class="fa-solid fa-film"></i> On-Demand Apps</h2>
             <span class="m3u-url">M3U: <a id="ondemand-m3u-url" href="/ondemand.m3u" target="_blank">/ondemand.m3u</a><button class="action-button copy-button" title="Copy full URL" onclick="copyToClipboard('ondemand-m3u-url')"><i class="fa-solid fa-copy"></i></button></span>
@@ -25,12 +117,28 @@
         <button class="button" onclick="openOnDemandModal()"><i class="fa-solid fa-plus"></i> Add On-Demand App</button>
         <button id="save-all-button" class="button" onclick="saveAllChanges()"><i class="fa-solid fa-save"></i> Save All Changes</button>
 
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-file-import"></i> Backup & Restore</h2></div>
+        <div class="backup-restore"><button class="button" onclick="downloadConfig()"><i class="fa-solid fa-download"></i> Download Configuration</button><hr style="border-color: var(--border-color); margin: 20px 0;"><form id="upload-form" action="/upload_config" method="post" enctype="multipart/form-data"><input type="file" name="file" id="file-input" required><button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload</button></form></div>
+
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-puzzle-piece"></i> Plugin Management</h2></div>
+        <div class="backup-restore">
+            <p>Upload a new plugin (`_plugin.py`) file. The server will restart to load the new plugin.</p>
+            <form id="upload-plugin-form" method="post" enctype="multipart/form-data">
+                <input type="file" name="file" id="plugin-file-input" required accept=".py">
+                <button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload Plugin</button>
+            </form>
+        </div>
+
         <div class="nav-links">
              <a href="/remote">Go to Remote</a>
              <a href="/preview">Live TV Preview</a>
              <a href="/pretune">On-Demand Pre-Tune</a>
         </div>
     </div>
+
+    <div id="tuner-modal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="tuner-modal-title">Edit Tuner</h3><span class="close-button" onclick="closeModal('tuner-modal')">&times;</span></div><div class="modal-body"><form id="tuner-form"><input type="hidden" id="tuner-index"><div class="form-group"><label for="tuner-name">Name</label><input type="text" id="tuner-name" required></div><div class="form-group"><label for="tuner-roku-ip">Roku IP</label><input type="text" id="tuner-roku-ip" required></div><div class="form-group"><label for="tuner-encoder-url">Encoder URL</label><input type="text" id="tuner-encoder-url" required></div><div class="form-group"><label for="tuner-priority">Priority</label><input type="number" id="tuner-priority" value="99"></div><div class="form-group"><label for="tuner-encoding-mode">Encoding Mode (Optional)</label><select id="tuner-encoding-mode"><option value="">Use Global Default</option><option value="proxy">Proxy</option><option value="remux">Remux</option><option value="reencode">Re-encode Audio</option></select></div><button type="submit" class="button">Save Tuner</button></form></div></div></div>
+    <div id="gracenote-channel-modal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="gracenote-channel-modal-title">Edit Gracenote Channel</h3><span class="close-button" onclick="closeModal('gracenote-channel-modal')">&times;</span></div><div class="modal-body"><form id="gracenote-channel-form"><input type="hidden" id="gracenote-channel-index"><h4>Required Fields</h4><div class="form-group"><label for="gracenote-name">Name <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The channel name that will be displayed in the M3U playlist and your DVR client.</span></div></label><input type="text" id="gracenote-name" required></div><div class="form-group"><label for="gracenote-id">ID <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">A unique identifier for this channel (e.g., 'ytv-espn'). Cannot contain spaces or special characters.</span></div></label><input type="text" id="gracenote-id" required></div><div class="form-group"><label for="gracenote-roku-app-id">Roku App ID <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The numerical ID of the Roku app to launch (e.g., '195316' for YouTube TV).</span></div></label><input type="text" id="gracenote-roku-app-id" required></div><div class="form-group"><label for="gracenote-station-id">Gracenote Station ID <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The Gracenote Station ID used by Channels DVR to fetch the correct guide data. Must be a numerical value.</span></div></label><input type="text" id="gracenote-station-id" required></div><hr><h4>Tuning Method (Choose One)</h4><div class="form-group"><label for="gracenote-deep-link-content-id">1. Deep Link Content ID <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The specific content ID used by the app to launch directly into the live stream. Omit this if using a Key Sequence or Plugin.</span></div></label><input type="text" id="gracenote-deep-link-content-id" placeholder="Use Deep Link OR Key Sequence OR Plugin"></div><div class="form-group"><label for="gracenote-key-sequence">2. Key Sequence <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">A comma-separated list of remote commands to execute after the app launches. Used when deep linking is not available. Example: `Down,wait=2,Select`</span></div></label><textarea id="gracenote-key-sequence" rows="2" placeholder="e.g. Down,wait=2,Select"></textarea></div><div class="form-group"><label for="gracenote-plugin-script">3. Plugin Script <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Select a custom Python plugin to handle complex tuning logic for this app.</span></div></label><select id="gracenote-plugin-script"><option value="">-- No Plugin --</option></select></div><div class="form-group"><label for="gracenote-plugin-list-position">Plugin List Position <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">A number passed to the selected plugin, often used to select an item from a list or guide within the app.</span></div></label><input type="number" id="gracenote-plugin-list-position" placeholder="e.g. 3 (for 3rd item in a list)"></div><hr><h4>Other Settings</h4><div class="form-group"><label for="gracenote-media-type">Media Type <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Specifies the type of content for deep linking. 'live' is the most common for TV channels.</span></div></label><select id="gracenote-media-type"><option value="live">live</option><option value="movie">movie</option><option value="episode">episode</option><option value="series">series</option></select></div><div class="form-group"><label for="gracenote-tune-delay">Tune Delay (sec) <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Pauses the script after launching the app to give it time to load before sending commands. Default: 1s</span></div></label><input type="number" id="gracenote-tune-delay" placeholder="Default: 1"></div><div class="form-group"><label for="gracenote-blank-duration">Blanking Duration (sec) <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Shows a black screen for this duration to hide the tuning process. Make this long enough to cover the entire Tune Delay and key sequences.</span></div></label><input type="number" id="gracenote-blank-duration" placeholder="e.g., 10" max="19"></div><div class="form-group-checkbox"><input type="checkbox" id="gracenote-needs-select"><label for="gracenote-needs-select">Needs "Select" Keypress After Tune <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Check this if the stream requires an extra 'Select' keypress to start playing after the initial tuning or deep link is complete.</span></div></label></div><hr><h4>Keep Alive</h4><div class="form-group-checkbox"><input type="checkbox" id="gracenote-keep-alive-enabled"><label for="gracenote-keep-alive-enabled">Enable Periodic Keypress <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Useful for apps like DirecTV that have an "Are you still watching?" prompt after 4 hours of inactivity.</span></div></label></div><div class="form-group"><label for="gracenote-keep-alive-interval">Interval (minutes) <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The number of minutes between sending the Keep Alive keypress sequence. Defaults to 225 (3 hours 45 minutes).</span></div></label><input type="number" id="gracenote-keep-alive-interval" placeholder="Default: 225"></div><div class="form-group"><label for="gracenote-keep-alive-key">Keypress Sequence <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The comma-separated key sequence to send periodically to prevent the app from showing an 'Are you still watching?' prompt.</span></div></label><input type="text" id="gracenote-keep-alive-key" placeholder="e.g., Left,wait=1,Right"></div><button type="submit" class="button">Save Channel</button></form></div></div></div>
+    <div id="epg-channel-modal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="epg-channel-modal-title">Edit EPG Channel</h3><span class="close-button" onclick="closeModal('epg-channel-modal')">&times;</span></div><div class="modal-body"><form id="epg-channel-form"><input type="hidden" id="epg-channel-index"><h4>Required Fields</h4><div class="form-group"><label for="epg-name">Name <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The channel name that will be displayed in the M3U playlist and your DVR client.</span></div></label><input type="text" id="epg-name" required></div><div class="form-group"><label for="epg-id">ID <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">A unique identifier for this channel (e.g., 'ytv-espn'). Cannot contain spaces or special characters.</span></div></label><input type="text" id="epg-id" required></div><div class="form-group"><label for="epg-roku-app-id">Roku App ID <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The numerical ID of the Roku app to launch (e.g., '195316' for YouTube TV).</span></div></label><input type="text" id="epg-roku-app-id" required></div><hr><h4>Tuning Method (Choose One)</h4><div class="form-group"><label for="epg-deep-link-content-id">1. Deep Link Content ID <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The specific content ID used by the app to launch directly into the live stream. Omit this if using a Key Sequence or Plugin.</span></div></label><input type="text" id="epg-deep-link-content-id"></div><div class="form-group"><label for="epg-key-sequence">2. Key Sequence <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">A comma-separated list of remote commands to execute after the app launches. Used when deep linking is not available. Example: `Down,wait=2,Select`</span></div></label><textarea id="epg-key-sequence" rows="2" placeholder="e.g. Down,wait=2,Select,Right"></textarea></div><div class="form-group"><label for="epg-plugin-script">3. Plugin Script <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Select a custom Python plugin to handle complex tuning logic for this app.</span></div></label><select id="epg-plugin-script"><option value="">-- No Plugin --</option></select></div><div class="form-group"><label for="epg-plugin-list-position">Plugin List Position <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">A number passed to the selected plugin, often used to select an item from a list or guide within the app.</span></div></label><input type="number" id="epg-plugin-list-position" placeholder="e.g. 3 (for 3rd item in a list)"></div><hr><h4>Other Settings</h4><div class="form-group"><label for="epg-media-type">Media Type <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Specifies the type of content for deep linking. 'live' is the most common for TV channels.</span></div></label><select id="epg-media-type"><option value="live">live</option><option value="movie">movie</option><option value="episode">episode</option><option value="series">series</option></select></div><div class="form-group"><label for="epg-blank-duration">Blanking Duration (sec) <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Shows a black screen for this duration to hide the tuning process. Make this long enough to cover the entire Tune Delay and key sequences.</span></div></label><input type="number" id="epg-blank-duration" placeholder="e.g., 10" max="19"></div><div class="form-group-checkbox"><input type="checkbox" id="epg-needs-select"><label for="epg-needs-select">Needs "Select" Keypress After Tune <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Check this if the stream requires an extra 'Select' keypress to start playing after the initial tuning or deep link is complete.</span></div></label></div><hr><h4>Keep Alive</h4><div class="form-group-checkbox"><input type="checkbox" id="epg-keep-alive-enabled"><label for="epg-keep-alive-enabled">Enable Periodic Keypress <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">Useful for apps like DirecTV that have an "Are you still watching?" prompt after 4 hours of inactivity.</span></div></label></div><div class="form-group"><label for="epg-keep-alive-interval">Interval (minutes) <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The number of minutes between sending the Keep Alive keypress sequence. Defaults to 225 (3 hours 45 minutes).</span></div></label><input type="number" id="epg-keep-alive-interval" placeholder="Default: 225"></div><div class="form-group"><label for="epg-keep-alive-key">Keypress Sequence <div class="tooltip"><i class="fa-solid fa-circle-info"></i><span class="tooltiptext">The comma-separated key sequence to send periodically to prevent the app from showing an 'Are you still watching?' prompt.</span></div></label><input type="text" id="epg-keep-alive-key" placeholder="e.g., Left,wait=1,Right"></div><hr><h4>Optional EPG Fields</h4><div id="dynamic-fields-container"></div><div class="optional-field-controls"><select id="optional-field-select"></select><button type="button" class="button" onclick="addOptionalEpgField()">Add Field</button></div><button type="submit" class="button" style="margin-top: 20px;">Save Channel</button></form></div></div></div>
 
     <div id="ondemand-modal" class="modal">
         <div class="modal-content">
@@ -59,18 +167,112 @@
         </div>
     </div>
     <script>
-        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [] }; // Add ondemand_apps
+        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [] };
+        let availablePlugins = [];
+        const epgOptionalFields = [ 'channel-number', 'tvg-logo', 'tvc-guide-art', 'tvc-guide-title', 'tvc-guide-description', 'tvc-guide-tags', 'tvc-guide-genres', 'tvc-guide-categories', 'tvc-guide-placeholders', 'tvc-stream-vcodec', 'tvc-stream-acodec', 'tune_delay' ];
 
-        // (All existing JavaScript functions remain)
+        async function loadPlugins() {
+            try {
+                const response = await fetch('/api/plugins');
+                availablePlugins = await response.json();
+            } catch (error) { console.error('Failed to load plugins:', error); }
+        }
+
+        function populatePluginDropdown(type) {
+            const selectId = `${type}-plugin-script`;
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">-- No Plugin --</option>';
+            availablePlugins.forEach(plugin => {
+                const option = document.createElement('option');
+                option.value = plugin.id;
+                option.textContent = plugin.name;
+                select.appendChild(option);
+            });
+            select.value = currentValue;
+        }
+
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                appConfig = await response.json();
+                renderAllTables();
+            } catch (error) { console.error('Failed to load config:', error); showNotification('Error loading configuration.', 'error'); }
+        }
+
+        async function saveAllChanges() {
+            try {
+                const response = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appConfig) });
+                const result = await response.json();
+                if (response.ok) { showNotification(result.message || 'Configuration saved!', 'success'); setTimeout(() => window.location.reload(), 2000); }
+                else { throw new Error(result.error || 'Unknown error'); }
+            } catch (error) { console.error('Failed to save config:', error); showNotification(`Save failed: ${error.message}`, 'error'); }
+        }
+
+        function downloadConfig() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appConfig, null, 2));
+            const a = document.createElement('a');
+            a.setAttribute("href", dataStr); a.setAttribute("download", "roku_channels.json");
+            document.body.appendChild(a); a.click(); a.remove();
+            showNotification('Configuration downloaded.', 'success');
+        }
+
+        function copyToClipboard(elementId) {
+            const urlElement = document.getElementById(elementId);
+            const fullUrl = urlElement.href;
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(fullUrl).then(() => {
+                    showNotification('URL copied to clipboard!', 'success');
+                }).catch(err => {
+                    showNotification('Failed to copy URL.', 'error');
+                });
+            } else {
+                const textArea = document.createElement('textarea');
+                textArea.value = fullUrl;
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    showNotification('URL copied to clipboard!', 'success');
+                } catch (err) {
+                    showNotification('Failed to copy URL.', 'error');
+                }
+                document.body.removeChild(textArea);
+            }
+        }
 
         function renderAllTables() {
             renderTuners();
             renderChannels('gracenote');
             renderChannels('epg');
-            renderOnDemandApps(); // Add this call
+            renderOnDemandApps();
         }
 
-        // ====== NEW ON-DEMAND RENDER/MODAL FUNCTIONS ======
+        function renderTuners() {
+            const tbody = document.getElementById('tuners-table-body');
+            tbody.innerHTML = (appConfig.tuners || []).map((t, i) => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td>${t.priority||''}</td><td>${t.encoding_mode||'Default'}</td><td><button class="action-button edit" onclick="openTunerModal(${i})"><i class="fa-solid fa-pencil"></i></button><button class="action-button delete" onclick="deleteItem('tuners', ${i})"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('');
+        }
+        function renderChannels(type) {
+            const key = type === 'gracenote' ? 'channels' : 'epg_channels';
+            const tbodyId = type === 'gracenote' ? 'channels-table-body' : 'epg-channels-table-body';
+            const tbody = document.getElementById(tbodyId);
+
+            tbody.innerHTML = (appConfig[key] || []).map((channel, index) => `
+                <tr>
+                    <td>${channel.name}</td>
+                    <td>${channel.id}</td>
+                    <td>${channel.roku_app_id}</td>
+                    <td>${type === 'gracenote' ? channel.tvc_guide_stationid : (channel['channel-number'] || '')}</td>
+                    <td>
+                        <button class="action-button edit" onclick="openChannelModal('${type}', ${index})"><i class="fa-solid fa-pencil"></i></button>
+                        <button class="action-button delete" onclick="deleteItem('${key}', ${index})"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
         function renderOnDemandApps() {
             const tbody = document.getElementById('ondemand-apps-table-body');
             tbody.innerHTML = (appConfig.ondemand_apps || []).map((app, i) => `
@@ -85,6 +287,154 @@
                 </tr>
             `).join('');
         }
+
+        function openModal(id) { document.getElementById(id).style.display = 'block'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+        function populateOptionalFieldsDropdown() {
+            const select = document.getElementById('optional-field-select');
+            select.innerHTML = '<option value="">-- Select a field to add --</option>';
+            const existingFields = new Set([...document.querySelectorAll('#dynamic-fields-container input')].map(i => i.dataset.key));
+            epgOptionalFields.forEach(field => {
+                if (!existingFields.has(field)) {
+                    const option = document.createElement('option');
+                    option.value = field;
+                    option.textContent = field;
+                    select.appendChild(option);
+                }
+            });
+        }
+
+        function addOptionalEpgField(fieldName = null, value = '') {
+            const select = document.getElementById('optional-field-select');
+            const fieldToAdd = fieldName || select.value;
+            if (!fieldToAdd) return;
+
+            const container = document.getElementById('dynamic-fields-container');
+            const newFieldDiv = document.createElement('div');
+            newFieldDiv.className = 'dynamic-field';
+
+            const isNumber = fieldToAdd === 'tune_delay';
+
+            newFieldDiv.innerHTML = `
+                <div class="form-group">
+                    <label>${fieldToAdd}</label>
+                    <input type="${isNumber ? 'number' : 'text'}" data-key="${fieldToAdd}" value="${value}">
+                </div>
+                <button type="button" class="action-button delete" onclick="removeOptionalField(this, '${fieldToAdd}')"><i class="fa-solid fa-trash"></i></button>
+            `;
+            container.appendChild(newFieldDiv);
+            populateOptionalFieldsDropdown();
+        }
+
+        function removeOptionalField(button, fieldName) {
+            button.parentElement.remove();
+            populateOptionalFieldsDropdown();
+        }
+
+        function openTunerModal(index = null) {
+            const form = document.getElementById('tuner-form'); form.reset();
+            document.getElementById('tuner-modal-title').textContent = index === null ? 'Add Tuner' : 'Edit Tuner';
+            document.getElementById('tuner-index').value = index !== null ? index : '';
+            if (index !== null) {
+                const t = appConfig.tuners[index];
+                Object.keys(t).forEach(key => { const el = document.getElementById(`tuner-${key.replace(/_/g, '-')}`); if (el) el.value = t[key] || (key === 'priority' ? 99 : ''); });
+            }
+            openModal('tuner-modal');
+        }
+
+        document.getElementById('tuner-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const index = this.querySelector('#tuner-index').value;
+            const data = {
+                name: this.querySelector('#tuner-name').value,
+                roku_ip: this.querySelector('#tuner-roku-ip').value,
+                encoder_url: this.querySelector('#tuner-encoder-url').value,
+                priority: parseInt(this.querySelector('#tuner-priority').value, 10),
+                encoding_mode: this.querySelector('#tuner-encoding-mode').value
+            };
+            if (!data.encoding_mode) delete data.encoding_mode;
+            if (index) appConfig.tuners[parseInt(index, 10)] = data; else appConfig.tuners.push(data);
+            renderTuners(); closeModal('tuner-modal');
+        });
+
+        function openChannelModal(type, index = null) {
+            const modalId = `${type}-channel-modal`;
+            const form = document.getElementById(`${type}-channel-form`); form.reset();
+            document.getElementById(`${type}-channel-modal-title`).textContent = index === null ? `Add ${type.charAt(0).toUpperCase() + type.slice(1)} Channel` : 'Edit Channel';
+            document.getElementById(`${type}-channel-index`).value = index !== null ? index : '';
+            populatePluginDropdown(type);
+
+            if (type === 'epg') {
+                document.getElementById('dynamic-fields-container').innerHTML = '';
+                populateOptionalFieldsDropdown();
+            }
+
+            if (index !== null) {
+                const key = type === 'gracenote' ? 'channels' : 'epg_channels';
+                const channel = appConfig[key][index];
+
+                form.querySelector(`#${type}-name`).value = channel.name || '';
+                form.querySelector(`#${type}-id`).value = channel.id || '';
+                form.querySelector(`#${type}-roku-app-id`).value = channel.roku_app_id || '';
+                form.querySelector(`#${type}-deep-link-content-id`).value = channel.deep_link_content_id || '';
+                form.querySelector(`#${type}-key-sequence`).value = (channel.key_sequence || []).join(',');
+                form.querySelector(`#${type}-media-type`).value = channel.media_type || 'live';
+                form.querySelector(`#${type}-needs-select`).checked = channel.needs_select_keypress || false;
+                form.querySelector(`#${type}-plugin-script`).value = channel.plugin_script || '';
+                form.querySelector(`#${type}-blank-duration`).value = channel.blank_duration || '';
+                if(channel.plugin_data) {
+                    form.querySelector(`#${type}-plugin-list-position`).value = channel.plugin_data.list_position || '';
+                }
+                form.querySelector(`#${type}-keep-alive-enabled`).checked = channel.keep_alive_enabled || false;
+                form.querySelector(`#${type}-keep-alive-key`).value = channel.keep_alive_key || '';
+                form.querySelector(`#${type}-keep-alive-interval`).value = channel.keep_alive_interval || '';
+
+                if (type === 'gracenote') {
+                    form.querySelector('#gracenote-station-id').value = channel.tvc_guide_stationid || '';
+                    form.querySelector('#gracenote-tune-delay').value = channel.tune_delay || '';
+                } else {
+                    for (const fieldKey of epgOptionalFields) {
+                        if (fieldKey in channel) {
+                            addOptionalEpgField(fieldKey, channel[fieldKey]);
+                        }
+                    }
+                }
+            }
+            openModal(modalId);
+        }
+
+        document.getElementById('gracenote-channel-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const index = this.querySelector('#gracenote-channel-index').value;
+            let data = { name: this.querySelector('#gracenote-name').value, id: this.querySelector('#gracenote-id').value, roku_app_id: this.querySelector('#gracenote-roku-app-id').value, deep_link_content_id: this.querySelector('#gracenote-deep-link-content-id').value, tvc_guide_stationid: this.querySelector('#gracenote-station-id').value, media_type: this.querySelector('#gracenote-media-type').value, needs_select_keypress: this.querySelector('#gracenote-needs-select').checked, plugin_script: this.querySelector('#gracenote-plugin-script').value, keep_alive_enabled: this.querySelector('#gracenote-keep-alive-enabled').checked, keep_alive_key: this.querySelector('#gracenote-keep-alive-key').value };
+            const tuneDelay = this.querySelector('#gracenote-tune-delay').value; if (tuneDelay) data.tune_delay = parseInt(tuneDelay, 10);
+            const blank_duration = this.querySelector('#gracenote-blank-duration').value; if(blank_duration) data.blank_duration = parseInt(blank_duration, 10);
+            const keepAliveInterval = this.querySelector('#gracenote-keep-alive-interval').value; if(keepAliveInterval) data.keep_alive_interval = parseInt(keepAliveInterval, 10);
+            const keySeq = this.querySelector('#gracenote-key-sequence').value; if (keySeq) data.key_sequence = keySeq.split(',').map(k => k.trim());
+            const listPos = this.querySelector('#gracenote-plugin-list-position').value; if (listPos) data.plugin_data = { list_position: parseInt(listPos, 10) };
+            Object.keys(data).forEach(k => (!data[k] || (Array.isArray(data[k]) && !data[k].length)) && delete data[k]);
+            if (index) appConfig.channels[parseInt(index, 10)] = data; else { if (!appConfig.channels) appConfig.channels = []; appConfig.channels.push(data); }
+            renderChannels('gracenote'); closeModal('gracenote-channel-modal');
+        });
+
+        document.getElementById('epg-channel-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const index = this.querySelector('#epg-channel-index').value;
+            let data = { name: this.querySelector('#epg-name').value, id: this.querySelector('#epg-id').value, roku_app_id: this.querySelector('#epg-roku-app-id').value, deep_link_content_id: this.querySelector('#epg-deep-link-content-id').value, media_type: this.querySelector('#epg-media-type').value, needs_select_keypress: this.querySelector('#epg-needs-select').checked, plugin_script: this.querySelector('#epg-plugin-script').value, keep_alive_enabled: this.querySelector('#epg-keep-alive-enabled').checked, keep_alive_key: this.querySelector('#epg-keep-alive-key').value };
+            const blank_duration = this.querySelector('#epg-blank-duration').value; if(blank_duration) data.blank_duration = parseInt(blank_duration, 10);
+            const keepAliveInterval = this.querySelector('#epg-keep-alive-interval').value; if(keepAliveInterval) data.keep_alive_interval = parseInt(keepAliveInterval, 10);
+            const keySeq = this.querySelector('#epg-key-sequence').value; if (keySeq) data.key_sequence = keySeq.split(',').map(k => k.trim());
+            const listPos = this.querySelector('#epg-plugin-list-position').value; if (listPos) data.plugin_data = { list_position: parseInt(listPos, 10) };
+            document.querySelectorAll('#dynamic-fields-container .dynamic-field input').forEach(inp => { if (inp.value || inp.value === 0) {
+                const key = inp.dataset.key;
+                const value = inp.type === 'number' ? parseInt(inp.value, 10) : inp.value;
+                data[key] = value;
+            }});
+            Object.keys(data).forEach(k => (!data[k] || (Array.isArray(data[k]) && !data[k].length)) && delete data[k]);
+            if (index) appConfig.epg_channels[parseInt(index, 10)] = data; else { if (!appConfig.epg_channels) appConfig.epg_channels = []; appConfig.epg_channels.push(data); }
+            renderChannels('epg'); closeModal('epg-channel-modal');
+        });
 
         function openOnDemandModal(index = null) {
             const form = document.getElementById('ondemand-form');
@@ -117,14 +467,111 @@
             renderOnDemandApps();
             closeModal('ondemand-modal');
         });
-        // ================================================
+
+        document.getElementById('upload-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            try {
+                const response = await fetch('/upload_config', { method: 'POST', body: formData });
+                const msg = await response.text(); showNotification(msg, response.ok ? 'success' : 'error');
+                if (response.ok) setTimeout(() => window.location.reload(), 1500);
+            } catch (error) { showNotification('Upload failed: ' + error.message, 'error'); }
+        });
+
+        document.getElementById('upload-plugin-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            try {
+                const response = await fetch('/upload_plugin', { method: 'POST', body: formData });
+                const msg = await response.text();
+                showNotification(msg, response.ok ? 'success' : 'error');
+                if (response.ok) setTimeout(() => window.location.reload(), 1500);
+            } catch (error) {
+                showNotification('Plugin upload failed: ' + error.message, 'error');
+            }
+        });
+
+        function deleteItem(key, index) { if (confirm('Are you sure?')) { appConfig[key].splice(index, 1); renderAllTables(); } }
+
+        async function fetchStatus() {
+            const tbody = document.getElementById('status-table-body');
+            try {
+                const response = await fetch('/api/status'); const data = await response.json();
+                if (tbody.rows.length !== data.tuners.length) {
+                    tbody.innerHTML = (data.tuners || []).map(t => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')}"><i class="fas fa-spinner fa-spin"></i></td></tr>`).join('');
+                }
+                (data.statuses || []).forEach(s => {
+                    const cell = document.getElementById(`status-${s.roku_ip.replace(/\./g, '-')}`);
+                    if (cell) cell.innerHTML = (s.roku_status === 'online' && s.encoder_status === 'online') ? '<i class="fas fa-check-circle" title="Roku & Encoder Online"></i>' : `${s.roku_status === 'online' ? '<i class="fas fa-check-circle" title="Roku Online"></i>' : '<i class="fas fa-times-circle" title="Roku Offline"></i>'} ${s.encoder_status === 'online' ? '<i class="fas fa-check-circle" title="Encoder Online"></i>' : '<i class="fas fa-times-circle" title="Encoder Offline"></i>'}`;
+                });
+            } catch (error) { console.error('Error fetching status:', error); tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--error-color);">Failed to load status.</td></tr>'; }
+        }
+
+        function showNotification(message, type = 'success') {
+            const n = document.createElement('div');
+            n.className = `notification`; n.style.backgroundColor = type === 'error' ? 'var(--error-color)' : 'var(--success-color)';
+            n.textContent = message; document.body.appendChild(n);
+            setTimeout(() => n.classList.add('show'), 10);
+            setTimeout(() => { n.classList.remove('show'); n.addEventListener('transitionend', () => n.remove()); }, 4000);
+        }
+
+        function applyFullScreenSetting() {
+            const isFull = localStorage.getItem('rokuBridgeFullScreen') === 'true';
+            document.querySelector('.container').classList.toggle('full-width', isFull);
+            document.getElementById('fullscreen-toggle').checked = isFull;
+        }
+
+        function setupFullScreenToggle() {
+            document.getElementById('fullscreen-toggle').addEventListener('change', function() {
+                localStorage.setItem('rokuBridgeFullScreen', this.checked);
+                applyFullScreenSetting();
+            });
+        }
+
+        function setupTooltips() {
+            document.body.addEventListener('mouseenter', (event) => {
+                const tooltipIcon = event.target.closest('.tooltip');
+                if (!tooltipIcon) return;
+                const tooltipText = tooltipIcon.querySelector('.tooltiptext');
+                if (!tooltipText) return;
+                tooltipText.classList.add('visible');
+                const textRect = tooltipText.getBoundingClientRect();
+                const container = tooltipIcon.closest('.modal-body') || document.body;
+                const containerRect = container.getBoundingClientRect();
+                if (textRect.top < containerRect.top + 10) {
+                    tooltipText.style.bottom = 'auto';
+                    tooltipText.style.top = '125%';
+                }
+                if (textRect.right > containerRect.right) {
+                    tooltipText.style.left = 'auto';
+                    tooltipText.style.right = '0px';
+                    tooltipText.style.transform = 'translateX(0)';
+                } else if (textRect.left < containerRect.left) {
+                     tooltipText.style.left = '0px';
+                     tooltipText.style.right = 'auto';
+                     tooltipText.style.transform = 'translateX(0)';
+                }
+            }, true);
+
+            document.body.addEventListener('mouseleave', (event) => {
+                const tooltipIcon = event.target.closest('.tooltip');
+                 if (!tooltipIcon) return;
+                const tooltipText = tooltipIcon.querySelector('.tooltiptext');
+                if (tooltipText) {
+                    tooltipText.classList.remove('visible');
+                }
+            }, true);
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
-            // ... (existing DOMContentLoaded logic)
+            fetchStatus(); loadConfig(); loadPlugins();
+            setupFullScreenToggle(); applyFullScreenSetting();
+            setupTooltips();
+            setInterval(fetchStatus, 30000);
             const host = window.location.origin;
             document.getElementById('gracenote-m3u-url').href = `${host}/channels.m3u`;
             document.getElementById('epg-m3u-url').href = `${host}/epg_channels.m3u`;
-            document.getElementById('ondemand-m3u-url').href = `${host}/ondemand.m3u`; // Add this line
+            document.getElementById('ondemand-m3u-url').href = `${host}/ondemand.m3u`;
         });
     </script>
 </body>
