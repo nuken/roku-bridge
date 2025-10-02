@@ -213,7 +213,7 @@ def start_preview_session():
             return {"status": "error", "message": "All tuners are in use."}
         PREVIEW_SESSION.update({'tuner': tuner, 'active': True, 'committed': False})
         logging.info(f"Started preview session on tuner {tuner['name']}")
-        return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip'], "encoder_url": tuner['encoder_url']}
+        return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip']}
 
 def stop_preview_session():
     with SESSION_LOCK:
@@ -361,6 +361,25 @@ def api_pretune_commit():
     status_code = 200 if result['status'] == 'success' else 409
     return jsonify(result), status_code
 
+# --- NEW: Proxy stream for the pre-tune page to avoid CORS issues ---
+@app.route('/api/pretune/stream')
+def api_pretune_stream():
+    with SESSION_LOCK:
+        if not PREVIEW_SESSION['active'] or not PREVIEW_SESSION['tuner']:
+            return "No active preview session.", 404
+        tuner = PREVIEW_SESSION['tuner']
+        encoder_url = tuner['encoder_url']
+        roku_ip = tuner['roku_ip'] # We don't release the tuner, it's just for the generator
+    
+    # We use a simple proxy here; the main stream_generator handles release logic
+    try:
+        req = requests.get(encoder_url, stream=True, timeout=10)
+        return Response(stream_with_context(req.iter_content(chunk_size=8192)), content_type=req.headers['content-type'])
+    except Exception as e:
+        logging.error(f"Error proxying pretune stream from {encoder_url}: {e}")
+        return "Failed to connect to encoder.", 500
+
+
 @app.route('/remote/launch/<device_ip>/<app_id>', methods=['POST'])
 def remote_launch(device_ip, app_id):
     try:
@@ -371,7 +390,9 @@ def remote_launch(device_ip, app_id):
 
 @app.route('/remote/keypress/<device_ip>/<key>', methods=['POST'])
 def remote_keypress(device_ip, key):
-    if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
+    # This check is important now that the IP comes from the client
+    if not any(t['roku_ip'] == device_ip for t in TUNERS) and (not PREVIEW_SESSION['tuner'] or PREVIEW_SESSION['tuner']['roku_ip'] != device_ip):
+        return jsonify({"status": "error", "message": "Device not found or not locked for preview."}), 404
     try:
         roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}")
         return jsonify({"status": "success"})
@@ -381,7 +402,7 @@ def remote_keypress(device_ip, key):
 @app.route('/remote/devices')
 def get_remote_devices():
     return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
-
+    
 @app.route('/api/status')
 def api_status():
     statuses = []

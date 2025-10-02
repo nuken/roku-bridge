@@ -52,14 +52,13 @@
             border-radius: 8px; z-index: 1001; color: white; opacity: 0; transition: opacity 0.5s, top 0.5s;
         }
         .notification.show { opacity: 1; top: 30px; }
-
+        
         /* Desktop Layout */
         @media (min-width: 769px) {
             .pretune-container { flex-direction: row; }
             .controls-wrapper { width: 30%; max-width: 400px; overflow-y: auto; }
             .video-wrapper { width: 70%; }
             .remote-overlay { display: none; }
-            /* Add full desktop remote styles here if needed */
         }
     </style>
 </head>
@@ -95,8 +94,8 @@
         const remoteOverlay = document.querySelector('.remote-overlay');
         const sendButton = document.getElementById('send-to-channels');
         let player;
-        let activeTunerIp = null; // IP of the tuner we've locked for pre-tuning
-
+        let activeTunerIp = null;
+        
         function showNotification(message, type = 'success') {
             const n = document.createElement('div');
             n.className = `notification`; n.style.backgroundColor = type === 'error' ? 'var(--error-color)' : 'var(--success-color)';
@@ -122,13 +121,16 @@
 
                 if (response.ok) {
                     activeTunerIp = data.roku_ip;
-                    const streamUrl = data.encoder_url;
+                    
+                    // --- THIS IS THE FIX ---
+                    // Connect to the proxy URL on our server, not the direct encoder URL
+                    const streamUrl = '/api/pretune/stream';
 
                     if (mpegts.isSupported()) {
                         player = mpegts.createPlayer({
                             type: 'mpegts',
                             isLive: true,
-                            url: streamUrl // We connect directly to the encoder for preview
+                            url: streamUrl
                         });
                         player.attachMediaElement(videoElement);
                         player.load();
@@ -142,12 +144,12 @@
                 showNotification(`Error starting preview: ${error.message}`, 'error');
             }
         }
-
+        
         async function launchApp() {
             if (!activeTunerIp) {
                 await startPreviewStream();
             }
-            if (!activeTunerIp) return; // Don't proceed if starting failed
+            if (!activeTunerIp) return;
 
             const appId = document.getElementById('app-launcher').value;
             if (!appId) return;
@@ -170,7 +172,7 @@
                 console.error(`Failed to send key ${key}:`, error);
             }
         }
-
+        
         async function sendToChannels() {
              if (!activeTunerIp) {
                 showNotification('Please start a preview and select content first.', 'error');
@@ -181,7 +183,6 @@
                 const data = await response.json();
                  if (response.ok) {
                     showNotification(data.message, 'success');
-                    // The backend now manages the stream; we can clean up the local player
                     cleanupPlayer();
                     activeTunerIp = null;
                     document.getElementById('app-launcher').value = '';
@@ -193,17 +194,14 @@
             }
         }
 
-        window.addEventListener('beforeunload', async () => {
+        window.addEventListener('beforeunload', () => {
             cleanupPlayer();
             if (activeTunerIp) {
-                // Use keepalive to prevent the request from being cancelled
                 navigator.sendBeacon('/api/pretune/stop');
             }
         });
 
         videoElement.addEventListener('click', () => remoteOverlay.classList.toggle('active'));
-
-        // Start a preview as soon as the page loads
         document.addEventListener('DOMContentLoaded', startPreviewStream);
     </script>
 </body>
