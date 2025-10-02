@@ -6,7 +6,7 @@ import os
 import requests
 import time
 import threading
-import httpx # httpx is still used for the silent stream, but not for the main proxy
+import httpx
 import urllib.parse
 import signal
 from collections import deque
@@ -19,7 +19,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.2-stream" # Updated Version
+APP_VERSION = "4.3-stream" # Updated Version
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -192,7 +192,6 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
             while time.time() - start_time < blank_duration:
                 yield SILENT_TS_PACKET
                 time.sleep(0.1)
-
         if mode in ['remux', 'reencode']:
             command = ['ffmpeg', '-i', encoder_url]
             if mode == 'reencode':
@@ -204,9 +203,8 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
             for chunk in iter(lambda: process.stdout.read(8192), b''): yield chunk
             process.wait()
         else: # Proxy
-            # --- THIS IS THE FIX: Use requests library for consistency ---
             with requests.get(encoder_url, timeout=15, stream=True, allow_redirects=True) as r:
-                r.raise_for_status() # Fail loudly if the encoder gives an error
+                r.raise_for_status()
                 for chunk in r.iter_content(chunk_size=8192):
                     yield chunk
     except Exception as e:
@@ -269,6 +267,10 @@ def stream_ondemand():
         tuner = PREVIEW_SESSION['tuner']
     
     logging.info(f"Channels DVR connected to committed stream from tuner {tuner['name']}")
+    
+    # --- THIS IS THE FIX: Add a delay to allow the browser's preview connection to close ---
+    time.sleep(2)
+    
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
