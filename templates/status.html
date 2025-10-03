@@ -16,10 +16,11 @@
         .version-info { font-size: 0.5em; color: var(--text-color); font-weight: normal; }
         .section-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 2px solid var(--border-color); }
         .section-header h2 { border-bottom: none; padding-bottom: 0; margin: 0; }
-        .m3u-url { background-color: var(--border-color); padding: 5px 10px; border-radius: 6px; font-size: 0.9em; display: flex; align-items: center; gap: 8px; }
+        .m3u-url { background-color: var(--border-color); padding: 5px 10px; border-radius: 6px; font-size: 0.9em; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .m3u-url a { color: var(--primary-color); text-decoration: none; }
         .m3u-url a:hover { text-decoration: underline; }
         .copy-button { padding: 4px 8px; font-size: 0.8em; }
+        .playlist-input { padding: 4px 8px; background-color: var(--bg-color); color: var(--text-color); border: 1px solid #555; border-radius: 4px; max-width: 100px; }
         .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; margin-top: 20px; max-height: 400px; overflow-y: auto; }
         table { width: 100%; border-collapse: collapse; min-width: 600px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
@@ -97,10 +98,26 @@
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-satellite-dish"></i> Tuners</h2></div>
         <div class="table-wrapper"><table id="tuners-table"><thead><tr><th>Name</th><th>Roku IP</th><th>Encoder URL</th><th>Priority</th><th>Encoding Mode</th><th>Actions</th></tr></thead><tbody id="tuners-table-body"></tbody></table></div>
         <button class="button" onclick="openTunerModal()"><i class="fa-solid fa-plus"></i> Add Tuner</button>
-        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-tv"></i> Gracenote Channels</h2><span class="m3u-url">M3U: <a id="gracenote-m3u-url" href="/channels.m3u" target="_blank">/channels.m3u</a><button class="action-button copy-button" title="Copy full URL" onclick="copyToClipboard('gracenote-m3u-url')"><i class="fa-solid fa-copy"></i></button></span></div>
+        
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
+            <h2><i class="fa-solid fa-tv"></i> Gracenote Channels</h2>
+            <span class="m3u-url">
+                M3U: <a id="gracenote-m3u-url" href="/channels.m3u" target="_blank">/channels.m3u</a>
+                <input type="text" id="gracenote-playlist-input" class="playlist-input" placeholder="Playlist (opt.)">
+                <button class="action-button copy-button" title="Copy full URL" onclick="copyToClipboard('gracenote-m3u-url', 'gracenote-playlist-input')"><i class="fa-solid fa-copy"></i></button>
+            </span>
+        </div>
         <div class="table-wrapper"><table id="channels-table"><thead><tr><th>Name</th><th>ID</th><th>App ID</th><th>Station ID</th><th>Playlist</th><th>Actions</th></tr></thead><tbody id="channels-table-body"></tbody></table></div>
         <button class="button" onclick="openChannelModal('gracenote')"><i class="fa-solid fa-plus"></i> Add Gracenote Channel</button>
-        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-list-alt"></i> Custom EPG Channels</h2><span class="m3u-url">M3U: <a id="epg-m3u-url" href="/epg_channels.m3u" target="_blank">/epg_channels.m3u</a><button class="action-button copy-button" title="Copy full URL" onclick="copyToClipboard('epg-m3u-url')"><i class="fa-solid fa-copy"></i></button></span></div>
+
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
+            <h2><i class="fa-solid fa-list-alt"></i> Custom EPG Channels</h2>
+            <span class="m3u-url">
+                M3U: <a id="epg-m3u-url" href="/epg_channels.m3u" target="_blank">/epg_channels.m3u</a>
+                <input type="text" id="epg-playlist-input" class="playlist-input" placeholder="Playlist (opt.)">
+                <button class="action-button copy-button" title="Copy full URL" onclick="copyToClipboard('epg-m3u-url', 'epg-playlist-input')"><i class="fa-solid fa-copy"></i></button>
+            </span>
+        </div>
         <div class="table-wrapper"><table id="epg-channels-table"><thead><tr><th>Name</th><th>ID</th><th>App ID</th><th>Channel #</th><th>Playlist</th><th>Actions</th></tr></thead><tbody id="epg-channels-table-body"></tbody></table></div>
         <button class="button" onclick="openChannelModal('epg')"><i class="fa-solid fa-plus"></i> Add EPG Channel</button>
 
@@ -195,16 +212,14 @@
             showNotification('Configuration downloaded.', 'success');
         }
 
-        // --- THIS IS THE FIX ---
-        function copyToClipboard(elementId) {
+        // --- REWRITTEN FUNCTION FOR UNSECURE HTTP ---
+        function copyToClipboard(elementId, inputId = null) {
             const urlElement = document.getElementById(elementId);
             let fullUrl = urlElement.href;
 
-            if (elementId !== 'ondemand-m3u-url') {
-                const playlist = prompt("Enter an optional playlist name to filter this M3U URL (or leave blank for all channels):", "");
-                if (playlist === null) {
-                    return; // User cancelled
-                }
+            if (inputId) {
+                const playlistInput = document.getElementById(inputId);
+                const playlist = playlistInput.value.trim();
                 if (playlist) {
                     fullUrl += `?playlist=${encodeURIComponent(playlist)}`;
                 }
@@ -212,8 +227,16 @@
 
             const textArea = document.createElement('textarea');
             textArea.value = fullUrl;
-            textArea.style.position = 'fixed';
-            textArea.style.opacity = '0';
+            textArea.style.position = 'fixed'; // Prevent scrolling to bottom of page in MS Edge.
+            textArea.style.top = 0;
+            textArea.style.left = 0;
+            textArea.style.width = '2em';
+            textArea.style.height = '2em';
+            textArea.style.padding = 0;
+            textArea.style.border = 'none';
+            textArea.style.outline = 'none';
+            textArea.style.boxShadow = 'none';
+            textArea.style.background = 'transparent';
             document.body.appendChild(textArea);
             textArea.focus();
             textArea.select();
@@ -226,13 +249,13 @@
                     showNotification('Failed to copy URL.', 'error');
                 }
             } catch (err) {
-                console.error('execCommand failed:', err);
+                console.error('Copy command failed:', err);
                 showNotification('Failed to copy URL.', 'error');
             }
 
             document.body.removeChild(textArea);
         }
-        // --- END OF FIX ---
+        // --- END OF REWRITE ---
 
 
         function renderAllTables() {
