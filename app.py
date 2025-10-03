@@ -19,7 +19,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.3-stream" # Updated Version
+APP_VERSION = "4.4-stream" # Updated Version
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -67,6 +67,7 @@ TUNER_LOCK = threading.Lock()
 KEEP_ALIVE_TASKS = {}
 PREVIEW_SESSION = {'tuner': None, 'active': False, 'committed': False}
 SESSION_LOCK = threading.Lock()
+
 
 roku_session = requests.Session()
 roku_session.timeout = 3
@@ -120,9 +121,9 @@ def release_tuner(tuner_ip):
                 if tuner['in_use']:
                     tuner['in_use'] = False
                     if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name')}")
-                    try: 
+                    try:
                         roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
-                    except requests.exceptions.RequestException: 
+                    except requests.exceptions.RequestException:
                         pass
                 break
 
@@ -267,33 +268,48 @@ def stream_ondemand():
         tuner = PREVIEW_SESSION['tuner']
     
     logging.info(f"Channels DVR connected to committed stream from tuner {tuner['name']}")
-    
-    # --- THIS IS THE FIX: Add a delay to allow the browser's preview connection to close ---
     time.sleep(2)
     
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
-def generate_m3u_from_channels(channel_list):
+# --- THIS IS THE UPDATE: The M3U generator now accepts a filter ---
+def generate_m3u_from_channels(channel_list, playlist_filter=None):
+    """Generic M3U generator with optional playlist filtering."""
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
-    for channel in channel_list:
+
+    filtered_list = channel_list
+    if playlist_filter:
+        filtered_list = [
+            ch for ch in channel_list
+            if ch.get('playlist') == playlist_filter
+        ]
+        logging.info(f"Filtering M3U for playlist='{playlist_filter}'. Found {len(filtered_list)} matching channels.")
+
+    for channel in filtered_list:
         stream_url = f"http://{request.host}/stream/{channel['id']}"
         extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
         tags = { "tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo", "tvc-guide-stationid": "tvc_guide_stationid" }
         for tag, key in tags.items():
             if key in channel: extinf_line += f' {tag}="{channel[key]}"'
+        # Add the playlist to the group-title tag for better client support
+        if 'playlist' in channel and channel['playlist']:
+            extinf_line += f' group-title="{channel["playlist"]}"'
         extinf_line += f',{channel["name"]}'
         m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
+# --- UPDATED ROUTES to handle the 'playlist' query parameter ---
 @app.route('/channels.m3u')
 def generate_gracenote_m3u():
-    return generate_m3u_from_channels(CHANNELS)
+    playlist_filter = request.args.get('playlist')
+    return generate_m3u_from_channels(CHANNELS, playlist_filter)
 
 @app.route('/epg_channels.m3u')
 def generate_epg_m3u():
-    return generate_m3u_from_channels(EPG_CHANNELS)
+    playlist_filter = request.args.get('playlist')
+    return generate_m3u_from_channels(EPG_CHANNELS, playlist_filter)
 
 @app.route('/ondemand.m3u')
 def generate_ondemand_m3u():
