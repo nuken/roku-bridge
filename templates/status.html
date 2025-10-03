@@ -200,48 +200,38 @@
             const urlElement = document.getElementById(elementId);
             let fullUrl = urlElement.href;
 
-            // Do not prompt for on-demand M3U
-            if (elementId === 'ondemand-m3u-url') {
-                copyUrl(fullUrl);
-                return;
+            if (elementId !== 'ondemand-m3u-url') {
+                const playlist = prompt("Enter an optional playlist name to filter this M3U URL (or leave blank for all channels):", "");
+                if (playlist === null) {
+                    return; // User cancelled
+                }
+                if (playlist) {
+                    fullUrl += `?playlist=${encodeURIComponent(playlist)}`;
+                }
             }
 
-            const playlist = prompt("Enter an optional playlist name to filter this M3U URL (or leave blank for all channels):", "");
+            const textArea = document.createElement('textarea');
+            textArea.value = fullUrl;
+            textArea.style.position = 'fixed'; // Prevent scrolling to bottom of page in MS Edge.
+            textArea.style.top = '0';
+            textArea.style.left = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
 
-            if (playlist === null) { // User clicked cancel
-                return;
-            }
-
-            if (playlist) {
-                fullUrl += `?playlist=${encodeURIComponent(playlist)}`;
-            }
-            
-            copyUrl(fullUrl);
-        }
-
-        function copyUrl(url) {
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(url).then(() => {
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
                     showNotification('URL copied to clipboard!', 'success');
-                }).catch(err => {
-                    console.error('Clipboard API failed:', err);
-                    showNotification('Failed to copy URL.', 'error');
-                });
-            } else {
-                const textArea = document.createElement('textarea');
-                textArea.value = url;
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                    showNotification('URL copied to clipboard!', 'success');
-                } catch (err) {
-                    console.error('execCommand failed:', err);
+                } else {
                     showNotification('Failed to copy URL.', 'error');
                 }
-                document.body.removeChild(textArea);
+            } catch (err) {
+                console.error('execCommand failed:', err);
+                showNotification('Failed to copy URL.', 'error');
             }
+
+            document.body.removeChild(textArea);
         }
         // --- END OF FIX ---
 
