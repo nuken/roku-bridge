@@ -195,25 +195,41 @@
             showNotification('Configuration downloaded.', 'success');
         }
 
+        // --- THIS IS THE FIX ---
         function copyToClipboard(elementId) {
             const urlElement = document.getElementById(elementId);
             let fullUrl = urlElement.href;
-            
-            // Allow user to enter a playlist filter
+
+            // Do not prompt for on-demand M3U
+            if (elementId === 'ondemand-m3u-url') {
+                copyUrl(fullUrl);
+                return;
+            }
+
             const playlist = prompt("Enter an optional playlist name to filter this M3U URL (or leave blank for all channels):", "");
+
+            if (playlist === null) { // User clicked cancel
+                return;
+            }
+
             if (playlist) {
                 fullUrl += `?playlist=${encodeURIComponent(playlist)}`;
             }
+            
+            copyUrl(fullUrl);
+        }
 
+        function copyUrl(url) {
             if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(fullUrl).then(() => {
+                navigator.clipboard.writeText(url).then(() => {
                     showNotification('URL copied to clipboard!', 'success');
                 }).catch(err => {
+                    console.error('Clipboard API failed:', err);
                     showNotification('Failed to copy URL.', 'error');
                 });
             } else {
                 const textArea = document.createElement('textarea');
-                textArea.value = fullUrl;
+                textArea.value = url;
                 document.body.appendChild(textArea);
                 textArea.focus();
                 textArea.select();
@@ -221,11 +237,13 @@
                     document.execCommand('copy');
                     showNotification('URL copied to clipboard!', 'success');
                 } catch (err) {
+                    console.error('execCommand failed:', err);
                     showNotification('Failed to copy URL.', 'error');
                 }
                 document.body.removeChild(textArea);
             }
         }
+        // --- END OF FIX ---
 
         function renderAllTables() {
             renderTuners();
@@ -338,7 +356,7 @@
             if (index !== null) {
                 const key = type === 'gracenote' ? 'channels' : 'epg_channels';
                 const channel = appConfig[key][index];
-                form.querySelector(`#${type}-playlist`).value = channel.playlist || ''; // Load playlist
+                form.querySelector(`#${type}-playlist`).value = channel.playlist || '';
                 form.querySelector(`#${type}-name`).value = channel.name || '';
                 form.querySelector(`#${type}-id`).value = channel.id || '';
                 form.querySelector(`#${type}-roku-app-id`).value = channel.roku_app_id || '';
