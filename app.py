@@ -328,6 +328,11 @@ def generate_ondemand_m3u():
             extinf_line += f' tvg-logo="{ONDEMAND_SETTINGS["tvg_logo"]}"'
         if ONDEMAND_SETTINGS.get('tvc_guide_art'):
             extinf_line += f' tvc-guide-art="{ONDEMAND_SETTINGS["tvc_guide_art"]}"'
+        
+        # --- THIS IS THE FIX ---
+        extinf_line += f',{channel_name}'
+        # --- END OF FIX ---
+        
         m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
