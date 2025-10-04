@@ -180,7 +180,7 @@
 
         async function loadDevices() {
             try {
-                const response = await fetch('/remote/devices');
+                const response = await fetch(window.location.origin + '/remote/devices');
                 const devices = await response.json();
                 deviceSelect.innerHTML = '<option value="">Select a Roku Device</option>';
                 devices.forEach(device => {
@@ -217,7 +217,7 @@
             }
             try {
                 const encodedKey = encodeURIComponent(key);
-                const response = await fetch(`/remote/keypress/${selectedDeviceIp}/${encodedKey}`, { method: 'POST' });
+                const response = await fetch(`${window.location.origin}/remote/keypress/${selectedDeviceIp}/${encodedKey}`, { method: 'POST' });
                 const result = await response.json();
                 if (result.status !== 'success') {
                     showNotification(`Error: ${result.message}`);
@@ -265,7 +265,7 @@
 
         async function confirmReboot() {
             try {
-                const response = await fetch(`/remote/reboot/${selectedDeviceIp}`, { method: 'POST' });
+                const response = await fetch(`${window.location.origin}/remote/reboot/${selectedDeviceIp}`, { method: 'POST' });
                 const result = await response.json();
                 if (result.status === 'success') {
                     showNotification('Reboot command sent!');
