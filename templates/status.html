@@ -91,7 +91,7 @@
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-globe"></i> Global Settings</h2></div>
         <div class="global-settings">
             <p>These settings are configured at startup and cannot be changed here.</p>
-            <p><strong>Default Encoding Mode:</strong> code>{{ global_settings.encoding_mode }}</code></p>
+            <p><strong>Default Encoding Mode:</strong> <code>{{ global_settings.encoding_mode }}</code></p>
             <p><strong>Audio Bitrate:</strong> <code>{{ global_settings.audio_bitrate }}</code></p>
             <p><strong>Audio Channels:</strong> <code>{{ global_settings.audio_channels }}</code></p>
             <p>
@@ -142,7 +142,7 @@
         <button id="save-all-button" class="button" onclick="saveAllChanges()"><i class="fa-solid fa-save"></i> Save All Changes</button>
         
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-file-import"></i> Backup & Restore</h2></div>
-        <div class="backup-restore"><button class="button" onclick="downloadConfig()"><i class="fa-solid fa-download"></i> Download Configuration</button><hr style="border-color: var(--border-color); margin: 20px 0;"><form id="upload-form" action="/upload_config" method="post" enctype="multipart/form-data"><input type="file" name="file" id="file-input" required><button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload</button></form></div>
+        <div class="backup-restore"><button class="button" onclick="downloadConfig()"><i class="fa-solid fa-download"></i> Download Configuration</button><hr style="border-color: var(--border-color); margin: 20px 0;"><form id="upload-form" method="post" enctype="multipart/form-data"><input type="file" name="file" id="file-input" required><button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload</button></form></div>
         
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-puzzle-piece"></i> Plugin Management</h2></div>
         <div class="backup-restore">
@@ -159,7 +159,40 @@
     <div id="gracenote-channel-modal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="gracenote-channel-modal-title">Edit Gracenote Channel</h3><span class="close-button" onclick="closeModal('gracenote-channel-modal')">&times;</span></div><div class="modal-body"><form id="gracenote-channel-form"><input type="hidden" id="gracenote-channel-index"><h4>Required Fields</h4><div class="form-group"><label for="gracenote-name">Name</label><input type="text" id="gracenote-name" required></div><div class="form-group"><label for="gracenote-id">ID</label><input type="text" id="gracenote-id" required></div><div class="form-group"><label for="gracenote-roku-app-id">Roku App ID</label><input type="text" id="gracenote-roku-app-id" required></div><div class="form-group"><label for="gracenote-station-id">Gracenote Station ID</label><input type="text" id="gracenote-station-id" required></div><hr><h4>Other Settings</h4><div class="form-group"><label for="gracenote-playlist">Playlist Name (Optional)</label><input type="text" id="gracenote-playlist" placeholder="e.g., YTTV"></div><hr><h4>Tuning Method (Choose One)</h4><div class="form-group"><label for="gracenote-deep-link-content-id">1. Deep Link Content ID</label><input type="text" id="gracenote-deep-link-content-id" placeholder="Use Deep Link OR Key Sequence OR Plugin"></div><div class="form-group"><label for="gracenote-key-sequence">2. Key Sequence</label><textarea id="gracenote-key-sequence" rows="2" placeholder="e.g. Down,wait=2,Select"></textarea></div><div class="form-group"><label for="gracenote-plugin-script">3. Plugin Script</label><select id="gracenote-plugin-script"><option value="">-- No Plugin --</option></select></div><div class="form-group"><label for="gracenote-plugin-list-position">Plugin List Position</label><input type="number" id="gracenote-plugin-list-position" placeholder="e.g. 3 (for 3rd item in a list)"></div><hr><h4>Advanced</h4><div class="form-group"><label for="gracenote-media-type">Media Type</label><select id="gracenote-media-type"><option value="live">live</option><option value="movie">movie</option><option value="episode">episode</option><option value="series">series</option></select></div><div class="form-group"><label for="gracenote-tune-delay">Tune Delay (sec)</label><input type="number" id="gracenote-tune-delay" placeholder="Default: 1"></div><div class="form-group"><label for="gracenote-blank-duration">Blanking Duration (sec)</label><input type="number" id="gracenote-blank-duration" placeholder="e.g., 10" max="19"></div><div class="form-group-checkbox"><input type="checkbox" id="gracenote-needs-select"><label for="gracenote-needs-select">Needs "Select" Keypress After Tune</label></div><hr><h4>Keep Alive</h4><div class="form-group-checkbox"><input type="checkbox" id="gracenote-keep-alive-enabled"><label for="gracenote-keep-alive-enabled">Enable Periodic Keypress</label></div><div class="form-group"><label for="gracenote-keep-alive-interval">Interval (minutes)</label><input type="number" id="gracenote-keep-alive-interval" placeholder="Default: 225"></div><div class="form-group"><label for="gracenote-keep-alive-key">Keypress Sequence</label><input type="text" id="gracenote-keep-alive-key" placeholder="e.g., Left,wait=1,Right"></div><button type="submit" class="button">Save Channel</button></form></div></div></div>
     <div id="epg-channel-modal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="epg-channel-modal-title">Edit EPG Channel</h3><span class="close-button" onclick="closeModal('epg-channel-modal')">&times;</span></div><div class="modal-body"><form id="epg-channel-form"><input type="hidden" id="epg-channel-index"><h4>Required Fields</h4><div class="form-group"><label for="epg-name">Name</label><input type="text" id="epg-name" required></div><div class="form-group"><label for="epg-id">ID</label><input type="text" id="epg-id" required></div><div class="form-group"><label for="epg-roku-app-id">Roku App ID</label><input type="text" id="epg-roku-app-id" required></div><hr><h4>Other Settings</h4><div class="form-group"><label for="epg-playlist">Playlist Name (Optional)</label><input type="text" id="epg-playlist" placeholder="e.g., Philo"></div><hr><h4>Tuning Method (Choose One)</h4><div class="form-group"><label for="epg-deep-link-content-id">1. Deep Link Content ID</label><input type="text" id="epg-deep-link-content-id"></div><div class="form-group"><label for="epg-key-sequence">2. Key Sequence</label><textarea id="epg-key-sequence" rows="2" placeholder="e.g. Down,wait=2,Select,Right"></textarea></div><div class="form-group"><label for="epg-plugin-script">3. Plugin Script</label><select id="epg-plugin-script"><option value="">-- No Plugin --</option></select></div><div class="form-group"><label for="epg-plugin-list-position">Plugin List Position</label><input type="number" id="epg-plugin-list-position" placeholder="e.g. 3 (for 3rd item in a list)"></div><hr><h4>Advanced</h4><div class="form-group"><label for="epg-media-type">Media Type</label><select id="epg-media-type"><option value="live">live</option><option value="movie">movie</option><option value="episode">episode</option><option value="series">series</option></select></div><div class="form-group"><label for="epg-blank-duration">Blanking Duration (sec)</label><input type="number" id="epg-blank-duration" placeholder="e.g., 10" max="19"></div><div class="form-group-checkbox"><input type="checkbox" id="epg-needs-select"><label for="epg-needs-select">Needs "Select" Keypress After Tune</label></div><hr><h4>Keep Alive</h4><div class="form-group-checkbox"><input type="checkbox" id="epg-keep-alive-enabled"><label for="epg-keep-alive-enabled">Enable Periodic Keypress</label></div><div class="form-group"><label for="epg-keep-alive-interval">Interval (minutes)</label><input type="number" id="epg-keep-alive-interval" placeholder="Default: 225"></div><div class="form-group"><label for="epg-keep-alive-key">Keypress Sequence</label><input type="text" id="epg-keep-alive-key" placeholder="e.g., Left,wait=1,Right"></div><hr><h4>Optional EPG Fields</h4><div id="dynamic-fields-container"></div><div class="optional-field-controls"><select id="optional-field-select"></select><button type="button" class="button" onclick="addOptionalEpgField()">Add Field</button></div><button type="submit" class="button" style="margin-top: 20px;">Save Channel</button></form></div></div></div>
     
-    <div id="ondemand-modal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="ondemand-modal-title">Edit On-Demand App</h3><span class="close-button" onclick="closeModal('ondemand-modal')">&times;</span></div><div class="modal-body"><form id="ondemand-form"><input type="hidden" id="ondemand-index"><div class="form-group"><label for="ondemand-name">Name</label><input type="text" id="ondemand-name" required></div><div class="form-group"><label for="ondemand-id">ID</label><input type="text" id="ondemand-id" required></div><div class="form-group"><label for="ondemand-roku-app-id">Roku App ID</label><input type="text" id="ondemand-roku-app-id" required></div><button type="submit" class="button">Save App</button></form></div></div></div>
+    <div id="ondemand-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="ondemand-modal-title">Edit On-Demand App</h3>
+                <span class="close-button" onclick="closeModal('ondemand-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="ondemand-form">
+                    <input type="hidden" id="ondemand-index">
+                    <div class="form-group">
+                        <label for="ondemand-name">Name</label>
+                        <input type="text" id="ondemand-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ondemand-id">ID</label>
+                        <input type="text" id="ondemand-id" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ondemand-roku-app-id">Roku App ID</label>
+                        <input type="text" id="ondemand-roku-app-id" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ondemand-tvg-logo">Logo URL (Optional, 4:3)</label>
+                        <input type="text" id="ondemand-tvg-logo" placeholder="https://...">
+                    </div>
+                    <div class="form-group">
+                        <label for="ondemand-tvc-guide-art">Guide Art URL (Optional, 4:3)</label>
+                        <input type="text" id="ondemand-tvc-guide-art" placeholder="https://...">
+                    </div>
+                    <button type="submit" class="button">Save App</button>
+                </form>
+            </div>
+        </div>
+    </div>
 
     <script>
         let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [] };
@@ -213,7 +246,6 @@
             showNotification('Configuration downloaded.', 'success');
         }
 
-        // --- REWRITTEN FUNCTION FOR UNSECURE HTTP ---
         function copyToClipboard(elementId, inputId = null) {
             const urlElement = document.getElementById(elementId);
             let fullUrl = urlElement.href;
@@ -228,7 +260,7 @@
 
             const textArea = document.createElement('textarea');
             textArea.value = fullUrl;
-            textArea.style.position = 'fixed'; // Prevent scrolling to bottom of page in MS Edge.
+            textArea.style.position = 'fixed';
             textArea.style.top = 0;
             textArea.style.left = 0;
             textArea.style.width = '2em';
@@ -256,8 +288,6 @@
 
             document.body.removeChild(textArea);
         }
-        // --- END OF REWRITE ---
-
 
         function renderAllTables() {
             renderTuners();
@@ -434,6 +464,8 @@
                 form.querySelector('#ondemand-name').value = app.name || '';
                 form.querySelector('#ondemand-id').value = app.id || '';
                 form.querySelector('#ondemand-roku-app-id').value = app.roku_app_id || '';
+                form.querySelector('#ondemand-tvg-logo').value = app.tvg_logo || '';
+                form.querySelector('#ondemand-tvc-guide-art').value = app.tvc_guide_art || '';
             }
             openModal('ondemand-modal');
         }
@@ -441,12 +473,9 @@
         document.getElementById('ondemand-form').addEventListener('submit', function(e) {
             e.preventDefault();
             const index = this.querySelector('#ondemand-index').value;
-            const data = { name: this.querySelector('#ondemand-name').value, id: this.querySelector('#ondemand-id').value, roku_app_id: this.querySelector('#ondemand-roku-app-id').value };
-            if (index) { appConfig.ondemand_apps[parseInt(index, 10)] = data; } else { if (!appConfig.ondemand_apps) appConfig.ondemand_apps = []; appConfig.ondemand_apps.push(data); }
-            renderOnDemandApps();
-            closeModal('ondemand-modal');
-        });
-
+            const data = { 
+                name: this.querySelector('#ondemand-name').value, 
+// ... existing code ... -->
         document.getElementById('upload-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const formData = new FormData(this);
@@ -465,11 +494,7 @@
                 const msg = await response.text();
                 showNotification(msg, response.ok ? 'success' : 'error');
                 if (response.ok) setTimeout(() => window.location.reload(), 1500);
-            } catch (error) {
-                showNotification('Plugin upload failed: ' + error.message, 'error');
-            }
-        });
-
+// ... existing code ... -->
         function deleteItem(key, index) { if (confirm('Are you sure?')) { appConfig[key].splice(index, 1); renderAllTables(); } }
 
         async function fetchStatus() {
@@ -555,3 +580,5 @@
     </script>
 </body>
 </html>
+
+
