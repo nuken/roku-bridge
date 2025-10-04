@@ -89,6 +89,7 @@
                 <a href="/pretune">On-Demand Pre-Tune</a>
             </div>
         </div>
+
         <div class="table-wrapper"><table id="status-table"><thead><tr><th>Tuner Name</th><th>Roku IP</th><th>Encoder URL</th><th style="text-align: center;">Status</th></tr></thead><tbody id="status-table-body"></tbody></table></div>
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-globe"></i> Global Settings</h2></div>
         <div class="global-settings">
@@ -154,8 +155,7 @@
                 <button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload Plugin</button>
             </form>
         </div>
-        
-        </div>
+    </div>
 
     <div id="tuner-modal" class="modal">...</div>
     <div id="gracenote-channel-modal" class="modal">...</div>
@@ -163,7 +163,386 @@
     <div id="ondemand-modal" class="modal">...</div>
 
     <script>
-        // All JavaScript remains unchanged
+        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [] };
+        let availablePlugins = [];
+        const epgOptionalFields = [ 'channel-number', 'tvg-logo', 'tvc-guide-art', 'tvc-guide-title', 'tvc-guide-description', 'tvc-guide-tags', 'tvc-guide-genres', 'tvc-guide-categories', 'tvc-guide-placeholders', 'tvc-stream-vcodec', 'tvc-stream-acodec', 'tune_delay' ];
+
+        async function loadPlugins() {
+            try {
+                const response = await fetch('/api/plugins');
+                availablePlugins = await response.json();
+            } catch (error) { console.error('Failed to load plugins:', error); }
+        }
+
+        function populatePluginDropdown(type) {
+            const selectId = `${type}-plugin-script`;
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">-- No Plugin --</option>';
+            availablePlugins.forEach(plugin => {
+                const option = document.createElement('option');
+                option.value = plugin.id;
+                option.textContent = plugin.name;
+                select.appendChild(option);
+            });
+            select.value = currentValue;
+        }
+
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                appConfig = await response.json();
+                renderAllTables();
+            } catch (error) { console.error('Failed to load config:', error); showNotification('Error loading configuration.', 'error'); }
+        }
+
+        async function saveAllChanges() {
+            try {
+                const response = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appConfig) });
+                const result = await response.json();
+                if (response.ok) { showNotification(result.message || 'Configuration saved!', 'success'); setTimeout(() => window.location.reload(), 2000); }
+                else { throw new Error(result.error || 'Unknown error'); }
+            } catch (error) { console.error('Failed to save config:', error); showNotification(`Save failed: ${error.message}`, 'error'); }
+        }
+
+        function downloadConfig() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appConfig, null, 2));
+            const a = document.createElement('a');
+            a.setAttribute("href", dataStr); a.setAttribute("download", "roku_channels.json");
+            document.body.appendChild(a); a.click(); a.remove();
+            showNotification('Configuration downloaded.', 'success');
+        }
+        
+        // --- THIS IS THE FIX ---
+        function copyToClipboard(elementId, inputId) {
+            const urlElement = document.getElementById(elementId);
+            let fullUrl = urlElement.href;
+
+            if (inputId) {
+                const playlistInput = document.getElementById(inputId);
+                const playlist = playlistInput.value.trim();
+                if (playlist) {
+                    fullUrl += `?playlist=${encodeURIComponent(playlist)}`;
+                }
+            }
+
+            const textArea = document.createElement('textarea');
+            textArea.value = fullUrl;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showNotification('URL copied to clipboard!', 'success');
+                } else {
+                    showNotification('Failed to copy URL.', 'error');
+                }
+            } catch (err) {
+                console.error('Copy command failed:', err);
+                showNotification('Failed to copy URL.', 'error');
+            }
+            document.body.removeChild(textArea);
+        }
+        // --- END OF FIX ---
+
+        function renderAllTables() {
+            renderTuners();
+            renderChannels('gracenote');
+            renderChannels('epg');
+            renderOnDemandApps();
+        }
+
+        function renderTuners() {
+            const tbody = document.getElementById('tuners-table-body');
+            tbody.innerHTML = (appConfig.tuners || []).map((t, i) => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td>${t.priority||''}</td><td>${t.encoding_mode||'Default'}</td><td><button class="action-button edit" onclick="openTunerModal(${i})"><i class="fa-solid fa-pencil"></i></button><button class="action-button delete" onclick="deleteItem('tuners', ${i})"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('');
+        }
+        function renderChannels(type) {
+            const key = type === 'gracenote' ? 'channels' : 'epg_channels';
+            const tbodyId = type === 'gracenote' ? 'channels-table-body' : 'epg-channels-table-body';
+            const tbody = document.getElementById(tbodyId);
+
+            tbody.innerHTML = (appConfig[key] || []).map((channel, index) => `
+                <tr>
+                    <td>${channel.name}</td>
+                    <td>${channel.id}</td>
+                    <td>${channel.roku_app_id}</td>
+                    <td>${type === 'gracenote' ? channel.tvc_guide_stationid : (channel['channel-number'] || '')}</td>
+                    <td>${channel.playlist || ''}</td>
+                    <td>
+                        <button class="action-button edit" onclick="openChannelModal('${type}', ${index})"><i class="fa-solid fa-pencil"></i></button>
+                        <button class="action-button delete" onclick="deleteItem('${key}', ${index})"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+        
+        function renderOnDemandApps() {
+            const tbody = document.getElementById('ondemand-apps-table-body');
+            tbody.innerHTML = (appConfig.ondemand_apps || []).map((app, i) => `
+                <tr>
+                    <td>${app.name}</td>
+                    <td>${app.id}</td>
+                    <td>${app.roku_app_id}</td>
+                    <td>
+                        <button class="action-button edit" onclick="openOnDemandModal(${i})"><i class="fa-solid fa-pencil"></i></button>
+                        <button class="action-button delete" onclick="deleteItem('ondemand_apps', ${i})"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function openModal(id) { document.getElementById(id).style.display = 'block'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        
+        function populateOptionalFieldsDropdown() {
+            const select = document.getElementById('optional-field-select');
+            select.innerHTML = '<option value="">-- Select a field to add --</option>';
+            const existingFields = new Set([...document.querySelectorAll('#dynamic-fields-container input')].map(i => i.dataset.key));
+            epgOptionalFields.forEach(field => {
+                if (!existingFields.has(field)) {
+                    const option = document.createElement('option');
+                    option.value = field;
+                    option.textContent = field;
+                    select.appendChild(option);
+                }
+            });
+        }
+
+        function addOptionalEpgField(fieldName = null, value = '') {
+            const select = document.getElementById('optional-field-select');
+            const fieldToAdd = fieldName || select.value;
+            if (!fieldToAdd) return;
+            const container = document.getElementById('dynamic-fields-container');
+            const newFieldDiv = document.createElement('div');
+            newFieldDiv.className = 'dynamic-field';
+            const isNumber = fieldToAdd === 'tune_delay';
+            newFieldDiv.innerHTML = `<div class="form-group"><label>${fieldToAdd}</label><input type="${isNumber ? 'number' : 'text'}" data-key="${fieldToAdd}" value="${value}"></div><button type="button" class="action-button delete" onclick="removeOptionalField(this, '${fieldToAdd}')"><i class="fa-solid fa-trash"></i></button>`;
+            container.appendChild(newFieldDiv);
+            populateOptionalFieldsDropdown();
+        }
+
+        function removeOptionalField(button, fieldName) {
+            button.parentElement.remove();
+            populateOptionalFieldsDropdown();
+        }
+
+        function openTunerModal(index = null) {
+            const form = document.getElementById('tuner-form'); form.reset();
+            document.getElementById('tuner-modal-title').textContent = index === null ? 'Add Tuner' : 'Edit Tuner';
+            document.getElementById('tuner-index').value = index !== null ? index : '';
+            if (index !== null) {
+                const t = appConfig.tuners[index];
+                Object.keys(t).forEach(key => { const el = document.getElementById(`tuner-${key.replace(/_/g, '-')}`); if (el) el.value = t[key] || (key === 'priority' ? 99 : ''); });
+            }
+            openModal('tuner-modal');
+        }
+
+        document.getElementById('tuner-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const index = this.querySelector('#tuner-index').value;
+            const data = { name: this.querySelector('#tuner-name').value, roku_ip: this.querySelector('#tuner-roku-ip').value, encoder_url: this.querySelector('#tuner-encoder-url').value, priority: parseInt(this.querySelector('#tuner-priority').value, 10), encoding_mode: this.querySelector('#tuner-encoding-mode').value };
+            if (!data.encoding_mode) delete data.encoding_mode;
+            if (index) appConfig.tuners[parseInt(index, 10)] = data; else appConfig.tuners.push(data);
+            renderTuners(); closeModal('tuner-modal');
+        });
+
+        function openChannelModal(type, index = null) {
+            const modalId = `${type}-channel-modal`;
+            const form = document.getElementById(`${type}-channel-form`); form.reset();
+            document.getElementById(`${type}-channel-modal-title`).textContent = index === null ? `Add ${type.charAt(0).toUpperCase() + type.slice(1)} Channel` : 'Edit Channel';
+            document.getElementById(`${type}-channel-index`).value = index !== null ? index : '';
+            populatePluginDropdown(type);
+            if (type === 'epg') { document.getElementById('dynamic-fields-container').innerHTML = ''; populateOptionalFieldsDropdown(); }
+            if (index !== null) {
+                const key = type === 'gracenote' ? 'channels' : 'epg_channels';
+                const channel = appConfig[key][index];
+                form.querySelector(`#${type}-playlist`).value = channel.playlist || '';
+                form.querySelector(`#${type}-name`).value = channel.name || '';
+                form.querySelector(`#${type}-id`).value = channel.id || '';
+                form.querySelector(`#${type}-roku-app-id`).value = channel.roku_app_id || '';
+                form.querySelector(`#${type}-deep-link-content-id`).value = channel.deep_link_content_id || '';
+                form.querySelector(`#${type}-key-sequence`).value = (channel.key_sequence || []).join(',');
+                form.querySelector(`#${type}-media-type`).value = channel.media_type || 'live';
+                form.querySelector(`#${type}-needs-select`).checked = channel.needs_select_keypress || false;
+                form.querySelector(`#${type}-plugin-script`).value = channel.plugin_script || '';
+                form.querySelector(`#${type}-blank-duration`).value = channel.blank_duration || '';
+                if(channel.plugin_data) { form.querySelector(`#${type}-plugin-list-position`).value = channel.plugin_data.list_position || ''; }
+                form.querySelector(`#${type}-keep-alive-enabled`).checked = channel.keep_alive_enabled || false;
+                form.querySelector(`#${type}-keep-alive-key`).value = channel.keep_alive_key || '';
+                form.querySelector(`#${type}-keep-alive-interval`).value = channel.keep_alive_interval || '';
+                if (type === 'gracenote') {
+                    form.querySelector('#gracenote-station-id').value = channel.tvc_guide_stationid || '';
+                    form.querySelector('#gracenote-tune-delay').value = channel.tune_delay || '';
+                } else { for (const fieldKey of epgOptionalFields) { if (fieldKey in channel) { addOptionalEpgField(fieldKey, channel[fieldKey]); } } }
+            }
+            openModal(modalId);
+        }
+
+        document.getElementById('gracenote-channel-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const index = this.querySelector('#gracenote-channel-index').value;
+            let data = { playlist: this.querySelector('#gracenote-playlist').value, name: this.querySelector('#gracenote-name').value, id: this.querySelector('#gracenote-id').value, roku_app_id: this.querySelector('#gracenote-roku-app-id').value, deep_link_content_id: this.querySelector('#gracenote-deep-link-content-id').value, tvc_guide_stationid: this.querySelector('#gracenote-station-id').value, media_type: this.querySelector('#gracenote-media-type').value, needs_select_keypress: this.querySelector('#gracenote-needs-select').checked, plugin_script: this.querySelector('#gracenote-plugin-script').value, keep_alive_enabled: this.querySelector('#gracenote-keep-alive-enabled').checked, keep_alive_key: this.querySelector('#gracenote-keep-alive-key').value };
+            const tuneDelay = this.querySelector('#gracenote-tune-delay').value; if (tuneDelay) data.tune_delay = parseInt(tuneDelay, 10);
+            const blank_duration = this.querySelector('#gracenote-blank-duration').value; if(blank_duration) data.blank_duration = parseInt(blank_duration, 10);
+            const keepAliveInterval = this.querySelector('#gracenote-keep-alive-interval').value; if(keepAliveInterval) data.keep_alive_interval = parseInt(keepAliveInterval, 10);
+            const keySeq = this.querySelector('#gracenote-key-sequence').value; if (keySeq) data.key_sequence = keySeq.split(',').map(k => k.trim());
+            const listPos = this.querySelector('#gracenote-plugin-list-position').value; if (listPos) data.plugin_data = { list_position: parseInt(listPos, 10) };
+            Object.keys(data).forEach(k => (!data[k] || (Array.isArray(data[k]) && !data[k].length)) && delete data[k]);
+            if (index) appConfig.channels[parseInt(index, 10)] = data; else { if (!appConfig.channels) appConfig.channels = []; appConfig.channels.push(data); }
+            renderChannels('gracenote'); closeModal('gracenote-channel-modal');
+        });
+
+        document.getElementById('epg-channel-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const index = this.querySelector('#epg-channel-index').value;
+            let data = { playlist: this.querySelector('#epg-playlist').value, name: this.querySelector('#epg-name').value, id: this.querySelector('#epg-id').value, roku_app_id: this.querySelector('#epg-roku-app-id').value, deep_link_content_id: this.querySelector('#epg-deep-link-content-id').value, media_type: this.querySelector('#epg-media-type').value, needs_select_keypress: this.querySelector('#epg-needs-select').checked, plugin_script: this.querySelector('#epg-plugin-script').value, keep_alive_enabled: this.querySelector('#epg-keep-alive-enabled').checked, keep_alive_key: this.querySelector('#epg-keep-alive-key').value };
+            const blank_duration = this.querySelector('#epg-blank-duration').value; if(blank_duration) data.blank_duration = parseInt(blank_duration, 10);
+            const keepAliveInterval = this.querySelector('#epg-keep-alive-interval').value; if(keepAliveInterval) data.keep_alive_interval = parseInt(keepAliveInterval, 10);
+            const keySeq = this.querySelector('#epg-key-sequence').value; if (keySeq) data.key_sequence = keySeq.split(',').map(k => k.trim());
+            const listPos = this.querySelector('#epg-plugin-list-position').value; if (listPos) data.plugin_data = { list_position: parseInt(listPos, 10) };
+            document.querySelectorAll('#dynamic-fields-container .dynamic-field input').forEach(inp => { if (inp.value || inp.value === 0) {
+                const key = inp.dataset.key;
+                const value = inp.type === 'number' ? parseInt(inp.value, 10) : inp.value;
+                data[key] = value;
+            }});
+            Object.keys(data).forEach(k => (!data[k] || (Array.isArray(data[k]) && !data[k].length)) && delete data[k]);
+            if (index) appConfig.epg_channels[parseInt(index, 10)] = data; else { if (!appConfig.epg_channels) appConfig.epg_channels = []; appConfig.epg_channels.push(data); }
+            renderChannels('epg'); closeModal('epg-channel-modal');
+        });
+        
+        function openOnDemandModal(index = null) {
+            const form = document.getElementById('ondemand-form');
+            form.reset();
+            document.getElementById('ondemand-modal-title').textContent = index === null ? 'Add On-Demand App' : 'Edit App';
+            document.getElementById('ondemand-index').value = index !== null ? index : '';
+            if (index !== null) {
+                const app = appConfig.ondemand_apps[index];
+                form.querySelector('#ondemand-name').value = app.name || '';
+                form.querySelector('#ondemand-id').value = app.id || '';
+                form.querySelector('#ondemand-roku-app-id').value = app.roku_app_id || '';
+            }
+            openModal('ondemand-modal');
+        }
+
+        document.getElementById('ondemand-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const index = this.querySelector('#ondemand-index').value;
+            const data = { name: this.querySelector('#ondemand-name').value, id: this.querySelector('#ondemand-id').value, roku_app_id: this.querySelector('#ondemand-roku-app-id').value };
+            if (index) { appConfig.ondemand_apps[parseInt(index, 10)] = data; } else { if (!appConfig.ondemand_apps) appConfig.ondemand_apps = []; appConfig.ondemand_apps.push(data); }
+            renderOnDemandApps();
+            closeModal('ondemand-modal');
+        });
+
+        document.getElementById('upload-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            try {
+                const response = await fetch('/upload_config', { method: 'POST', body: formData });
+                const msg = await response.text(); showNotification(msg, response.ok ? 'success' : 'error');
+                if (response.ok) setTimeout(() => window.location.reload(), 1500);
+            } catch (error) { showNotification('Upload failed: ' + error.message, 'error'); }
+        });
+
+        document.getElementById('upload-plugin-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            try {
+                const response = await fetch('/upload_plugin', { method: 'POST', body: formData });
+                const msg = await response.text();
+                showNotification(msg, response.ok ? 'success' : 'error');
+                if (response.ok) setTimeout(() => window.location.reload(), 1500);
+            } catch (error) {
+                showNotification('Plugin upload failed: ' + error.message, 'error');
+            }
+        });
+
+        function deleteItem(key, index) { if (confirm('Are you sure?')) { appConfig[key].splice(index, 1); renderAllTables(); } }
+
+        async function fetchStatus() {
+            const tbody = document.getElementById('status-table-body');
+            try {
+                const response = await fetch('/api/status'); const data = await response.json();
+                if (tbody.rows.length !== data.tuners.length) {
+                    tbody.innerHTML = (data.tuners || []).map(t => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')}"><i class="fas fa-spinner fa-spin"></i></td></tr>`).join('');
+                }
+                (data.statuses || []).forEach(s => {
+                    const cell = document.getElementById(`status-${s.roku_ip.replace(/\./g, '-')}`);
+                    if (cell) cell.innerHTML = (s.roku_status === 'online' && s.encoder_status === 'online') ? '<i class="fas fa-check-circle" title="Roku & Encoder Online"></i>' : `${s.roku_status === 'online' ? '<i class="fas fa-check-circle" title="Roku Online"></i>' : '<i class="fas fa-times-circle" title="Roku Offline"></i>'} ${s.encoder_status === 'online' ? '<i class="fas fa-check-circle" title="Encoder Online"></i>' : '<i class="fas fa-times-circle" title="Encoder Offline"></i>'}`;
+                });
+            } catch (error) { console.error('Error fetching status:', error); tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--error-color);">Failed to load status.</td></tr>'; }
+        }
+
+        function showNotification(message, type = 'success') {
+            const n = document.createElement('div');
+            n.className = `notification`; n.style.backgroundColor = type === 'error' ? 'var(--error-color)' : 'var(--success-color)';
+            n.textContent = message; document.body.appendChild(n);
+            setTimeout(() => n.classList.add('show'), 10);
+            setTimeout(() => { n.classList.remove('show'); n.addEventListener('transitionend', () => n.remove()); }, 4000);
+        }
+
+        function applyFullScreenSetting() {
+            const isFull = localStorage.getItem('rokuBridgeFullScreen') === 'true';
+            document.querySelector('.container').classList.toggle('full-width', isFull);
+            document.getElementById('fullscreen-toggle').checked = isFull;
+        }
+
+        function setupFullScreenToggle() {
+            document.getElementById('fullscreen-toggle').addEventListener('change', function() {
+                localStorage.setItem('rokuBridgeFullScreen', this.checked);
+                applyFullScreenSetting();
+            });
+        }
+        
+        function setupTooltips() {
+            document.body.addEventListener('mouseenter', (event) => {
+                const tooltipIcon = event.target.closest('.tooltip');
+                if (!tooltipIcon) return;
+                const tooltipText = tooltipIcon.querySelector('.tooltiptext');
+                if (!tooltipText) return;
+                tooltipText.classList.add('visible');
+                const textRect = tooltipText.getBoundingClientRect();
+                const container = tooltipIcon.closest('.modal-body') || document.body;
+                const containerRect = container.getBoundingClientRect();
+                if (textRect.top < containerRect.top + 10) {
+                    tooltipText.style.bottom = 'auto';
+                    tooltipText.style.top = '125%';
+                }
+                if (textRect.right > containerRect.right) {
+                    tooltipText.style.left = 'auto';
+                    tooltipText.style.right = '0px';
+                    tooltipText.style.transform = 'translateX(0)';
+                } else if (textRect.left < containerRect.left) {
+                     tooltipText.style.left = '0px';
+                     tooltipText.style.right = 'auto';
+                     tooltipText.style.transform = 'translateX(0)';
+                }
+            }, true);
+
+            document.body.addEventListener('mouseleave', (event) => {
+                const tooltipIcon = event.target.closest('.tooltip');
+                 if (!tooltipIcon) return;
+                const tooltipText = tooltipIcon.querySelector('.tooltiptext');
+                if (tooltipText) {
+                    tooltipText.classList.remove('visible');
+                }
+            }, true);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStatus(); loadConfig(); loadPlugins();
+            setupFullScreenToggle(); applyFullScreenSetting();
+            setupTooltips();
+            setInterval(fetchStatus, 30000);
+            const host = window.location.origin;
+            document.getElementById('gracenote-m3u-url').href = `${host}/channels.m3u`;
+            document.getElementById('epg-m3u-url').href = `${host}/epg_channels.m3u`;
+            document.getElementById('ondemand-m3u-url').href = `${host}/ondemand.m3u`;
+        });
     </script>
 </body>
 </html>

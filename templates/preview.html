@@ -18,8 +18,8 @@
             background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px;
         }
         .header-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 20px; }
-        .button, .nav-buttons a { background-color: var(--button-color); color: white; padding: 10px 15px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; text-decoration: none; transition: background-color 0.2s; display: inline-flex; align-items: center; gap: 8px; }
-        .button:hover, .nav-buttons a:hover { background-color: var(--button-hover-color); color: white; }
+        .nav-buttons a { background-color: var(--button-color); color: white; padding: 10px 15px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; text-decoration: none; transition: background-color 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .nav-buttons a:hover { background-color: var(--button-hover-color); color: white; }
         .container { display: flex; width: 100%; gap: 20px; height: calc(100vh - 100px); }
         .channel-list-container {
             background-color: var(--surface-color); border-radius: 20px; padding: 25px;
@@ -35,7 +35,7 @@
         li:last-child { border-bottom: none; }
         #stop-preview {
             width: 100%; padding: 15px; border-radius: 12px; border: none; font-size: 1.2em;
-            background-color: var(--error-color); color: white; cursor: pointer; margin-top: 20px;
+            background-color: var(--error-color); color: white; cursor: pointer; margin-top: 20px; margin-bottom: 20px;
         }
     </style>
 </head>
@@ -50,19 +50,63 @@
     <div class="container">
         <div class="channel-list-container">
             <h1><i class="fa-solid fa-list"></i> Channels</h1>
+            
+            <button id="stop-preview" onclick="stopPreview()">Stop Preview & Release Tuner</button>
             <ul id="channel-list">
                 {% for channel in channels %}
                     <li id="channel-{{ channel.id }}" onclick="playChannel('{{ channel.id }}', this)">{{ channel.name }}</li>
                 {% endfor %}
             </ul>
-            <button id="stop-preview" onclick="stopPreview()">Stop Preview & Release Tuner</button>
         </div>
         <div class="video-container">
             <video id="video-player" controls autoplay muted playsinline></video>
         </div>
     </div>
     <script>
-        // JavaScript remains unchanged
+        const videoElement = document.getElementById('video-player');
+        const channelList = document.getElementById('channel-list');
+        let player;
+
+        function cleanupPlayer() {
+            if (player) {
+                player.unload();
+                player.detachMediaElement();
+                player.destroy();
+                player = null;
+            }
+            videoElement.src = "";
+            const currentlyActive = channelList.querySelector('.active');
+            if (currentlyActive) {
+                currentlyActive.classList.remove('active');
+            }
+        }
+        
+        function stopPreview() {
+            cleanupPlayer();
+        }
+        
+        window.addEventListener('beforeunload', cleanupPlayer);
+
+        function playChannel(channelId, element) {
+            cleanupPlayer();
+
+            element.classList.add('active');
+
+            const streamUrl = `/stream/${channelId}?preview=true`;
+            
+            if (mpegts.isSupported()) {
+                player = mpegts.createPlayer({
+                    type: 'mpegts',
+                    isLive: true,
+                    url: streamUrl
+                });
+                player.attachMediaElement(videoElement);
+                player.load();
+                player.play();
+            } else {
+                alert('Your browser does not support mpegts.js playback.');
+            }
+        }
     </script>
 </body>
 </html>
