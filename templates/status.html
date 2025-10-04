@@ -139,6 +139,21 @@
         </div>
         <button class="button" onclick="openOnDemandModal()"><i class="fa-solid fa-plus"></i> Add On-Demand App</button>
 
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
+            <h2><i class="fa-solid fa-image"></i> On-Demand Channel Artwork</h2>
+        </div>
+        <div class="global-settings">
+            <p>Set the generic logo and guide art for the "On-Demand Stream" channels in your guide.</p>
+            <div class="form-group">
+                <label for="ondemand-settings-logo">Logo URL (4:3)</label>
+                <input type="text" id="ondemand-settings-logo" placeholder="https://...">
+            </div>
+            <div class="form-group">
+                <label for="ondemand-settings-art">Guide Art URL (4:3)</label>
+                <input type="text" id="ondemand-settings-art" placeholder="https://...">
+            </div>
+        </div>
+
         <button id="save-all-button" class="button" onclick="saveAllChanges()"><i class="fa-solid fa-save"></i> Save All Changes</button>
         
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-file-import"></i> Backup & Restore</h2></div>
@@ -180,14 +195,6 @@
                         <label for="ondemand-roku-app-id">Roku App ID</label>
                         <input type="text" id="ondemand-roku-app-id" required>
                     </div>
-                    <div class="form-group">
-                        <label for="ondemand-tvg-logo">Logo URL (Optional, 4:3)</label>
-                        <input type="text" id="ondemand-tvg-logo" placeholder="https://...">
-                    </div>
-                    <div class="form-group">
-                        <label for="ondemand-tvc-guide-art">Guide Art URL (Optional, 4:3)</label>
-                        <input type="text" id="ondemand-tvc-guide-art" placeholder="https://...">
-                    </div>
                     <button type="submit" class="button">Save App</button>
                 </form>
             </div>
@@ -195,7 +202,7 @@
     </div>
 
     <script>
-        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [] };
+        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [], ondemand_settings: {} };
         let availablePlugins = [];
         const epgOptionalFields = [ 'channel-number', 'tvg-logo', 'tvc-guide-art', 'tvc-guide-title', 'tvc-guide-description', 'tvc-guide-tags', 'tvc-guide-genres', 'tvc-guide-categories', 'tvc-guide-placeholders', 'tvc-stream-vcodec', 'tvc-stream-acodec', 'tune_delay' ];
 
@@ -226,11 +233,19 @@
                 const response = await fetch(window.location.origin + '/api/config');
                 appConfig = await response.json();
                 renderAllTables();
+                if (appConfig.ondemand_settings) {
+                    document.getElementById('ondemand-settings-logo').value = appConfig.ondemand_settings.tvg_logo || '';
+                    document.getElementById('ondemand-settings-art').value = appConfig.ondemand_settings.tvc_guide_art || '';
+                }
             } catch (error) { console.error('Failed to load config:', error); showNotification('Error loading configuration.', 'error'); }
         }
 
         async function saveAllChanges() {
             try {
+                appConfig.ondemand_settings = {
+                    tvg_logo: document.getElementById('ondemand-settings-logo').value,
+                    tvc_guide_art: document.getElementById('ondemand-settings-art').value
+                };
                 const response = await fetch(window.location.origin + '/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appConfig) });
                 const result = await response.json();
                 if (response.ok) { showNotification(result.message || 'Configuration saved!', 'success'); setTimeout(() => window.location.reload(), 2000); }
@@ -464,8 +479,6 @@
                 form.querySelector('#ondemand-name').value = app.name || '';
                 form.querySelector('#ondemand-id').value = app.id || '';
                 form.querySelector('#ondemand-roku-app-id').value = app.roku_app_id || '';
-                form.querySelector('#ondemand-tvg-logo').value = app.tvg_logo || '';
-                form.querySelector('#ondemand-tvc-guide-art').value = app.tvc_guide_art || '';
             }
             openModal('ondemand-modal');
         }
@@ -476,14 +489,8 @@
             const data = { 
                 name: this.querySelector('#ondemand-name').value, 
                 id: this.querySelector('#ondemand-id').value, 
-                roku_app_id: this.querySelector('#ondemand-roku-app-id').value,
-                tvg_logo: this.querySelector('#ondemand-tvg-logo').value,
-                tvc_guide_art: this.querySelector('#ondemand-tvc-guide-art').value
+                roku_app_id: this.querySelector('#ondemand-roku-app-id').value
             };
-             // Clean up empty optional fields
-            if (!data.tvg_logo) delete data.tvg_logo;
-            if (!data.tvc_guide_art) delete data.tvc_guide_art;
-
             if (index !== '' && appConfig.ondemand_apps[parseInt(index, 10)]) {
                  appConfig.ondemand_apps[parseInt(index, 10)] = data;
             } else {
@@ -524,7 +531,7 @@
             try {
                 const response = await fetch(window.location.origin + '/api/status'); const data = await response.json();
                 if (tbody.rows.length !== data.tuners.length) {
-                    tbody.innerHTML = (data.tuners || []).map(t => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')}"><i class="fas fa-spinner fa-spin"></i></td></tr>`).join('');
+                    tbody.innerHTML = (data.tuners || []).map(t => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')')}"><i class="fas fa-spinner fa-spin"></i></td></tr>`).join('');
                 }
                 (data.statuses || []).forEach(s => {
                     const cell = document.getElementById(`status-${s.roku_ip.replace(/\./g, '-')}`);

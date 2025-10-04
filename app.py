@@ -20,7 +20,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.6-stream" # Updated Version
+APP_VERSION = "4.5-stream"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -51,7 +51,6 @@ root_logger.addHandler(deque_handler)
 
 # --- Environment & Global Variables ---
 CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
-PLUGINS_DIR = os.path.join(os.path.dirname(__file__), 'plugins')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
@@ -64,28 +63,27 @@ def get_audio_channels():
 AUDIO_CHANNELS = get_audio_channels()
 
 # --- State Management ---
-TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS = [], [], [], []
+TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS = [], [], [], [], {}
 TUNER_LOCK = threading.Lock()
 KEEP_ALIVE_TASKS = {}
-# --- NEW: Changed PREVIEW_SESSION to a dictionary to handle multiple sessions ---
-PREVIEW_SESSIONS = {} # Key: roku_ip, Value: {'tuner': tuner_dict, 'active': True, 'committed': False}
+# --- NEW: Multi-session support for pre-tuning ---
+PREVIEW_SESSIONS = {} # Keyed by tuner IP
 SESSION_LOCK = threading.Lock()
-
 
 roku_session = requests.Session()
 roku_session.timeout = 3
-executor = ThreadPoolExecutor(max_workers=8) # Increased workers for more concurrent sessions
+executor = ThreadPoolExecutor(max_workers=10) # Increased workers for more concurrent tasks
 
 # --- Core Application Logic ---
 
 def load_config():
-    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS
+    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS
     if not os.path.exists(CONFIG_FILE_PATH):
         logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating default.")
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": []}, f, indent=2)
+                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}}, f, indent=2)
         except Exception as e:
             logging.error(f"Could not create default config: {e}")
     try:
@@ -95,27 +93,18 @@ def load_config():
         CHANNELS = config_data.get('channels', [])
         EPG_CHANNELS = config_data.get('epg_channels', [])
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
+        ONDEMAND_SETTINGS = config_data.get('ondemand_settings', {})
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
     except Exception as e:
         logging.error(f"Error loading config: {e}")
 
-def lock_tuner(tuner_ip=None):
+def lock_tuner():
     with TUNER_LOCK:
-        # If a specific tuner is requested
-        if tuner_ip:
-            for tuner in TUNERS:
-                if tuner.get('roku_ip') == tuner_ip and not tuner.get('in_use'):
-                    tuner['in_use'] = True
-                    if DEBUG_LOGGING_ENABLED: logging.info(f"Locked specific tuner: {tuner.get('name')}")
-                    return tuner
-            return None # Specific tuner is in use or not found
-
-        # Otherwise, find any available tuner
         for tuner in TUNERS:
             if not tuner.get('in_use'):
                 tuner['in_use'] = True
-                if DEBUG_LOGGING_ENABLED: logging.info(f"Locked available tuner: {tuner.get('name')}")
+                if DEBUG_LOGGING_ENABLED: logging.info(f"Locked tuner: {tuner.get('name')}")
                 return tuner
     return None
 
@@ -125,12 +114,11 @@ def release_tuner(tuner_ip):
         stop_event.set()
         thread.join(timeout=5)
     
-    # --- NEW: Updated to handle multiple preview sessions ---
     with SESSION_LOCK:
         if tuner_ip in PREVIEW_SESSIONS:
             del PREVIEW_SESSIONS[tuner_ip]
-            logging.info(f"Cleared preview session associated with tuner {tuner_ip}")
-            
+            logging.info(f"Cleared preview session for tuner {tuner_ip}")
+
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
@@ -229,36 +217,35 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-# --- NEW: All pre-tuning logic updated for multiple sessions ---
-def start_preview_session(tuner_ip, force=False):
-    with SESSION_LOCK:
-        if tuner_ip in PREVIEW_SESSIONS and not force:
-            return {"status": "error", "message": "On Demand in use"}
-        
-        if tuner_ip in PREVIEW_SESSIONS and force:
-            logging.info(f"Force starting session. Releasing tuner {tuner_ip} first.")
-            release_tuner(tuner_ip) # This will also clear the old session
-
-        tuner = lock_tuner(tuner_ip=tuner_ip)
+# --- Pre-Tune Session Management ---
+def start_preview_session(tuner_ip):
+    with TUNER_LOCK:
+        tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
         if not tuner:
-            return {"status": "error", "message": "Tuner is in use for Live TV or not found."}
-        
-        PREVIEW_SESSIONS[tuner_ip] = {'tuner': tuner, 'active': True, 'committed': False}
+            return {"status": "error", "message": "Tuner not found."}
+        if tuner.get('in_use'):
+            return {"status": "error", "message": "Tuner is already in use."}
+        tuner['in_use'] = True
+    
+    with SESSION_LOCK:
+        PREVIEW_SESSIONS[tuner_ip] = {'tuner': tuner, 'committed': False}
         logging.info(f"Started preview session on tuner {tuner['name']}")
         return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip']}
 
 def stop_preview_session(tuner_ip):
+    # This function is now just a wrapper for release_tuner for clarity
     release_tuner(tuner_ip)
+    return {"status": "success", "message": "Session stopped."}
 
 def commit_preview_session(tuner_ip):
     with SESSION_LOCK:
         if tuner_ip not in PREVIEW_SESSIONS:
             return {"status": "error", "message": "No active preview session to commit."}
         PREVIEW_SESSIONS[tuner_ip]['committed'] = True
-        logging.info(f"Committed preview session for tuner {PREVIEW_SESSIONS[tuner_ip]['tuner']['name']}. It is now ready for Channels DVR.")
+        tuner_name = PREVIEW_SESSIONS[tuner_ip]['tuner']['name']
+        logging.info(f"Committed preview session for tuner {tuner_name}.")
         return {"status": "success", "message": "Stream is now ready for Channels DVR."}
 
-# --- Stream Routes ---
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
     is_preview = request.args.get('preview', 'false').lower() == 'true'
@@ -281,23 +268,25 @@ def stream_channel(channel_id):
     generator = stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'], tuner_mode, blank_duration)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
-# --- NEW: On-demand stream now requires a tuner_ip ---
-@app.route('/stream/ondemand/<tuner_ip>')
-def stream_ondemand(tuner_ip):
+@app.route('/stream/ondemand_stream')
+def stream_ondemand():
+    tuner_ip = request.args.get('tuner_ip')
+    if not tuner_ip:
+        return "Tuner IP is required.", 400
+    
     with SESSION_LOCK:
         session = PREVIEW_SESSIONS.get(tuner_ip)
-        if not session or not session.get('committed'):
-             return "No pre-tuned stream is ready for this tuner.", 404
+        if not session or not session['committed']:
+            return "No pre-tuned stream is ready for this tuner.", 404
         tuner = session['tuner']
     
     logging.info(f"Channels DVR connected to committed stream from tuner {tuner['name']}")
-    time.sleep(2)
+    time.sleep(2) # Give a moment for connection
     
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
-# --- M3U Generation ---
 def generate_m3u_from_channels(channel_list, playlist_filter=None):
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
     filtered_list = channel_list
@@ -326,20 +315,23 @@ def generate_epg_m3u():
     playlist_filter = request.args.get('playlist')
     return generate_m3u_from_channels(EPG_CHANNELS, playlist_filter)
 
-# --- NEW: On-demand M3U generates an entry for each tuner ---
 @app.route('/ondemand.m3u')
 def generate_ondemand_m3u():
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
     for tuner in TUNERS:
-        tuner_name = tuner.get('name', tuner['roku_ip'])
-        tuner_ip = tuner['roku_ip']
-        stream_url = f"http://{request.host}/stream/ondemand/{tuner_ip}"
-        channel_id = f"ondemand_{tuner_name.replace(' ', '_').lower()}"
-        extinf_line = f'#EXTINF:-1 channel-id="{channel_id}" tvg-name="On-Demand ({tuner_name})",On-Demand ({tuner_name})'
+        tuner_name = tuner.get("name", tuner['roku_ip'])
+        channel_id = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
+        stream_url = f"http://{request.host}/stream/ondemand_stream?tuner_ip={tuner['roku_ip']}"
+        channel_name = f"On-Demand Stream ({tuner_name})"
+        extinf_line = f'#EXTINF:-1 channel-id="{channel_id}" tvg-name="{channel_name}"'
+        if ONDEMAND_SETTINGS.get('tvg_logo'):
+            extinf_line += f' tvg-logo="{ONDEMAND_SETTINGS["tvg_logo"]}"'
+        if ONDEMAND_SETTINGS.get('tvc_guide_art'):
+            extinf_line += f' tvc-guide-art="{ONDEMAND_SETTINGS["tvc_guide_art"]}"'
         m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
-# --- Web UI Routes ---
+
 @app.route('/')
 def index():
     return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a> | <a href='/preview'>Live TV Preview</a> | <a href='/pretune'>On-Demand Pre-Tune</a>"
@@ -359,16 +351,12 @@ def pretune_page():
 
 @app.route('/logs')
 def logs_page():
-    """Renders the log viewer page."""
-    if not DEBUG_LOGGING_ENABLED:
-        return "Debug logging is not enabled.", 404
+    if not DEBUG_LOGGING_ENABLED: return "Debug logging is not enabled.", 404
     return render_template('logs.html')
 
 @app.route('/logs/content')
 def logs_content():
-    """Returns the buffered logs as plain text."""
-    if not DEBUG_LOGGING_ENABLED:
-        return "Debug logging is not enabled.", 404
+    if not DEBUG_LOGGING_ENABLED: return "Debug logging is not enabled.", 404
     return Response("\n".join(log_buffer), mimetype='text/plain')
 
 @app.route('/status')
@@ -382,13 +370,13 @@ def status_page():
     }
     return render_template('status.html', global_settings=settings)
 
-# --- Configuration & Upload API ---
 @app.route('/api/config', methods=['GET', 'POST'])
 def api_config():
     if request.method == 'POST':
         try:
             new_config = request.get_json()
-            if not all(k in new_config for k in ['tuners', 'channels', 'epg_channels', 'ondemand_apps']):
+            required_keys = ['tuners', 'channels', 'epg_channels', 'ondemand_apps', 'ondemand_settings']
+            if not all(k in new_config for k in required_keys):
                 return jsonify({"error": "Invalid configuration structure."}), 400
             with open(CONFIG_FILE_PATH, 'w') as f: json.dump(new_config, f, indent=2)
             load_config()
@@ -401,71 +389,87 @@ def api_config():
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
             return jsonify(config_data)
         except FileNotFoundError:
-            return jsonify({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": []})
+            return jsonify({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])
 def upload_config():
-    if 'file' not in request.files: return 'No file part', 400
+    if 'file' not in request.files: return "No file part", 400
     file = request.files['file']
-    if file.filename == '': return 'No selected file', 400
-    if file and file.filename.endswith('.json'):
-        try:
-            filename = secure_filename(file.filename)
-            file.save(CONFIG_FILE_PATH)
-            load_config()
-            os.kill(os.getppid(), signal.SIGHUP)
-            return 'Configuration uploaded successfully. Server is reloading.', 200
-        except Exception as e:
-            return f'Error saving config: {e}', 500
-    return 'Invalid file type. Please upload a .json file.', 400
+    if file.filename == '' or not file.filename.endswith('.json'): return "Invalid file", 400
+    try:
+        filename = secure_filename(file.filename)
+        file.save(CONFIG_FILE_PATH)
+        load_config()
+        os.kill(os.getppid(), signal.SIGHUP)
+        return "Configuration updated successfully. Server is reloading...", 200
+    except Exception as e:
+        return f"Error processing config file: {e}", 400
 
 @app.route('/upload_plugin', methods=['POST'])
 def upload_plugin():
-    if 'file' not in request.files: return 'No file part', 400
+    if 'file' not in request.files: return "No file part", 400
     file = request.files['file']
-    if file.filename == '': return 'No selected file', 400
-    if file and file.filename.endswith('_plugin.py'):
-        try:
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(PLUGINS_DIR, filename))
-            os.kill(os.getppid(), signal.SIGHUP)
-            return 'Plugin uploaded successfully. Server is restarting to load it.', 200
-        except Exception as e:
-            return f'Error saving plugin: {e}', 500
-    return 'Invalid file name. Must end with "_plugin.py".', 400
+    if file.filename == '' or not file.filename.endswith('_plugin.py'): return "Invalid file. Must be a '_plugin.py' file.", 400
+    try:
+        plugins_dir = os.path.join(os.path.dirname(__file__), 'plugins')
+        os.makedirs(plugins_dir, exist_ok=True)
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(plugins_dir, filename)
+        if not os.path.normpath(save_path).startswith(os.path.abspath(plugins_dir)):
+            return "Invalid filename", 400
+        file.save(save_path)
+        logging.info(f"New plugin uploaded: {filename}")
+        os.kill(os.getppid(), signal.SIGHUP)
+        return "Plugin uploaded successfully. Server is reloading...", 200
+    except Exception as e:
+        logging.error(f"Error saving plugin: {e}")
+        return f"Error saving plugin file: {e}", 500
 
+# --- NEW Pre-Tune API ---
+@app.route('/api/pretune/status')
+def api_pretune_status():
+    with SESSION_LOCK:
+        active_ips = set(PREVIEW_SESSIONS.keys())
+    status = []
+    for tuner in TUNERS:
+        tuner_status = "in-use" if tuner['in_use'] else "available"
+        if tuner['roku_ip'] in active_ips:
+            tuner_status = "pre-tuning"
+        status.append({
+            "name": tuner.get("name", tuner['roku_ip']),
+            "roku_ip": tuner['roku_ip'],
+            "status": tuner_status
+        })
+    return jsonify(status)
 
-# --- Pre-tuning API (Updated for multi-session) ---
 @app.route('/api/pretune/start', methods=['POST'])
 def api_pretune_start():
-    data = request.get_json()
-    tuner_ip = data.get('tuner_ip')
-    force = data.get('force', False)
-    if not tuner_ip:
-        return jsonify({"status": "error", "message": "tuner_ip is required."}), 400
-    result = start_preview_session(tuner_ip, force)
-    status_code = 200 if result['status'] == 'success' else 409 # 409 Conflict
+    tuner_ip = request.json.get('tuner_ip')
+    if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
+    result = start_preview_session(tuner_ip)
+    status_code = 200 if result['status'] == 'success' else 503
     return jsonify(result), status_code
 
 @app.route('/api/pretune/stop', methods=['POST'])
 def api_pretune_stop():
-    tuner_ip = request.get_json().get('tuner_ip')
-    if not tuner_ip: return jsonify({"status": "error", "message": "tuner_ip is required."}), 400
-    stop_preview_session(tuner_ip)
-    return jsonify({"status": "success", "message": "Preview session stopped."})
+    tuner_ip = request.json.get('tuner_ip')
+    if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
+    result = stop_preview_session(tuner_ip)
+    return jsonify(result)
 
 @app.route('/api/pretune/commit', methods=['POST'])
 def api_pretune_commit():
-    tuner_ip = request.get_json().get('tuner_ip')
-    if not tuner_ip: return jsonify({"status": "error", "message": "tuner_ip is required."}), 400
+    tuner_ip = request.json.get('tuner_ip')
+    if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
     result = commit_preview_session(tuner_ip)
     status_code = 200 if result['status'] == 'success' else 409
     return jsonify(result), status_code
 
-@app.route('/api/pretune/stream/<tuner_ip>')
-def api_pretune_stream(tuner_ip):
+@app.route('/api/pretune/stream')
+def api_pretune_stream():
+    tuner_ip = request.args.get('tuner_ip')
     with SESSION_LOCK:
         if tuner_ip not in PREVIEW_SESSIONS:
             return "No active preview session for this tuner.", 404
@@ -477,27 +481,7 @@ def api_pretune_stream(tuner_ip):
     except Exception as e:
         logging.error(f"Error proxying pretune stream from {encoder_url}: {e}")
         return "Failed to connect to encoder.", 500
-        
-# --- NEW: API to get current session statuses ---
-@app.route('/api/pretune/sessions')
-def api_get_pretune_sessions():
-    with TUNER_LOCK, SESSION_LOCK:
-        status_list = []
-        for tuner in TUNERS:
-            t_ip = tuner['roku_ip']
-            status = {
-                "name": tuner.get('name', t_ip),
-                "roku_ip": t_ip,
-                "status": "Available"
-            }
-            if t_ip in PREVIEW_SESSIONS:
-                status["status"] = "On Demand in use"
-            elif tuner.get('in_use'):
-                status["status"] = "Live TV in use"
-            status_list.append(status)
-        return jsonify(status_list)
 
-# --- Remote Control API ---
 @app.route('/remote/launch/<device_ip>/<app_id>', methods=['POST'])
 def remote_launch(device_ip, app_id):
     try:
@@ -509,28 +493,26 @@ def remote_launch(device_ip, app_id):
 @app.route('/remote/keypress/<device_ip>/<key>', methods=['POST'])
 def remote_keypress(device_ip, key):
     with SESSION_LOCK:
-        is_preview_tuner = device_ip in PREVIEW_SESSIONS
-    if not any(t['roku_ip'] == device_ip for t in TUNERS) and not is_preview_tuner:
-        return jsonify({"status": "error", "message": "Device not found or not locked for preview."}), 404
+        is_in_preview = device_ip in PREVIEW_SESSIONS
+    if not any(t['roku_ip'] == device_ip for t in TUNERS) and not is_in_preview:
+        return jsonify({"status": "error", "message": "Device not found or not in a session."}), 404
     try:
         roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}")
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
+        
 @app.route('/remote/reboot/<device_ip>', methods=['POST'])
 def remote_reboot(device_ip):
     if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
-    reboot_sequence = ['Home', 'Home', 'Home', 'Home', 'Home', 'Up', 'Right', 'Select', 'Down', 'Down', 'Down', 'Down', 'Select', 'Select']
+    reboot_sequence = ['Home', 'Home', 'Home', 'Up', 'Right', 'Up', 'Right', 'Up', 'Up', 'Right', 'Select']
     executor.submit(send_key_sequence, device_ip, reboot_sequence)
-    logging.info(f"Initiated reboot sequence for {device_ip}")
     return jsonify({"status": "success", "message": "Reboot sequence initiated."})
 
 @app.route('/remote/devices')
 def get_remote_devices():
     return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
     
-# --- Status & Plugin API ---
 @app.route('/api/status')
 def api_status():
     statuses = []
@@ -557,10 +539,7 @@ def api_status():
 
 @app.route('/api/plugins')
 def api_plugins():
-    plugin_list = [
-        {"id": script_name, "name": plugin.app_name}
-        for script_name, plugin in discovered_plugins.items()
-    ]
+    plugin_list = [{"id": script_name, "name": plugin.app_name} for script_name, plugin in discovered_plugins.items()]
     return jsonify(plugin_list)
 
 if __name__ != '__main__':
