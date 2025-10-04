@@ -12,6 +12,7 @@ import signal
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
+from werkzeug.utils import secure_filename
 
 # --- Import Plugin System ---
 from plugins import discovered_plugins
@@ -50,6 +51,7 @@ root_logger.addHandler(deque_handler)
 
 # --- Environment & Global Variables ---
 CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
+PLUGINS_DIR = os.path.join(os.path.dirname(__file__), 'plugins')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
@@ -238,6 +240,7 @@ def commit_preview_session():
         logging.info(f"Committed preview session for tuner {PREVIEW_SESSION['tuner']['name']}. It is now ready for Channels DVR.")
         return {"status": "success", "message": "Stream is now ready for Channels DVR."}
 
+# --- Stream Routes ---
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
     is_preview = request.args.get('preview', 'false').lower() == 'true'
@@ -274,6 +277,7 @@ def stream_ondemand():
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
+# --- M3U Generation ---
 def generate_m3u_from_channels(channel_list, playlist_filter=None):
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
     filtered_list = channel_list
@@ -310,6 +314,7 @@ def generate_ondemand_m3u():
     m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
+# --- Web UI Routes ---
 @app.route('/')
 def index():
     return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a> | <a href='/preview'>Live TV Preview</a> | <a href='/pretune'>On-Demand Pre-Tune</a>"
@@ -327,11 +332,9 @@ def preview():
 def pretune_page():
     return render_template('pretune.html', ondemand_apps=ONDEMAND_APPS)
 
-# --- THIS IS THE FIX for the 404 error ---
 @app.route('/logs')
 def logs_page():
     """Renders the log viewer page."""
-    # This check ensures the page is only accessible if debug logging is enabled
     if not DEBUG_LOGGING_ENABLED:
         return "Debug logging is not enabled.", 404
     return render_template('logs.html')
@@ -342,7 +345,6 @@ def logs_content():
     if not DEBUG_LOGGING_ENABLED:
         return "Debug logging is not enabled.", 404
     return Response("\n".join(log_buffer), mimetype='text/plain')
-# --- END OF FIX ---
 
 @app.route('/status')
 def status_page():
@@ -355,6 +357,7 @@ def status_page():
     }
     return render_template('status.html', global_settings=settings)
 
+# --- Configuration & Upload API ---
 @app.route('/api/config', methods=['GET', 'POST'])
 def api_config():
     if request.method == 'POST':
@@ -377,6 +380,39 @@ def api_config():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+@app.route('/upload_config', methods=['POST'])
+def upload_config():
+    if 'file' not in request.files: return 'No file part', 400
+    file = request.files['file']
+    if file.filename == '': return 'No selected file', 400
+    if file and file.filename.endswith('.json'):
+        try:
+            filename = secure_filename(file.filename)
+            file.save(CONFIG_FILE_PATH)
+            load_config()
+            os.kill(os.getppid(), signal.SIGHUP)
+            return 'Configuration uploaded successfully. Server is reloading.', 200
+        except Exception as e:
+            return f'Error saving config: {e}', 500
+    return 'Invalid file type. Please upload a .json file.', 400
+
+@app.route('/upload_plugin', methods=['POST'])
+def upload_plugin():
+    if 'file' not in request.files: return 'No file part', 400
+    file = request.files['file']
+    if file.filename == '': return 'No selected file', 400
+    if file and file.filename.endswith('_plugin.py'):
+        try:
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(PLUGINS_DIR, filename))
+            os.kill(os.getppid(), signal.SIGHUP)
+            return 'Plugin uploaded successfully. Server is restarting to load it.', 200
+        except Exception as e:
+            return f'Error saving plugin: {e}', 500
+    return 'Invalid file name. Must end with "_plugin.py".', 400
+
+
+# --- Pre-tuning API ---
 @app.route('/api/pretune/start', methods=['POST'])
 def api_pretune_start():
     result = start_preview_session()
@@ -408,6 +444,7 @@ def api_pretune_stream():
         logging.error(f"Error proxying pretune stream from {encoder_url}: {e}")
         return "Failed to connect to encoder.", 500
 
+# --- Remote Control API ---
 @app.route('/remote/launch/<device_ip>/<app_id>', methods=['POST'])
 def remote_launch(device_ip, app_id):
     try:
@@ -426,10 +463,21 @@ def remote_keypress(device_ip, key):
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/remote/reboot/<device_ip>', methods=['POST'])
+def remote_reboot(device_ip):
+    if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
+    # This key sequence navigates to Settings > System > Power > System restart
+    # It may need adjustment for different Roku OS versions.
+    reboot_sequence = ['Home', 'Home', 'Home', 'Home', 'Home', 'Up', 'Right', 'Select', 'Down', 'Down', 'Down', 'Down', 'Select', 'Select']
+    executor.submit(send_key_sequence, device_ip, reboot_sequence)
+    logging.info(f"Initiated reboot sequence for {device_ip}")
+    return jsonify({"status": "success", "message": "Reboot sequence initiated."})
+
 @app.route('/remote/devices')
 def get_remote_devices():
     return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
     
+# --- Status & Plugin API ---
 @app.route('/api/status')
 def api_status():
     statuses = []
@@ -453,6 +501,14 @@ def api_status():
         statuses = list(status_executor.map(check_tuner_status, TUNERS))
     tuner_configs = [{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"], "encoder_url": t["encoder_url"]} for t in TUNERS]
     return jsonify({"tuners": tuner_configs, "statuses": statuses})
+
+@app.route('/api/plugins')
+def api_plugins():
+    plugin_list = [
+        {"id": script_name, "name": plugin.app_name}
+        for script_name, plugin in discovered_plugins.items()
+    ]
+    return jsonify(plugin_list)
 
 if __name__ != '__main__':
     load_config()
