@@ -531,7 +531,7 @@
             try {
                 const response = await fetch(window.location.origin + '/api/status'); const data = await response.json();
                 if (tbody.rows.length !== data.tuners.length) {
-                    tbody.innerHTML = (data.tuners || []).map(t => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')')}"><i class="fas fa-spinner fa-spin"></i></td></tr>`).join('');
+                    tbody.innerHTML = (data.tuners || []).map(t => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')}"><i class="fas fa-spinner fa-spin"></i></td></tr>`).join('');
                 }
                 (data.statuses || []).forEach(s => {
                     const cell = document.getElementById(`status-${s.roku_ip.replace(/\./g, '-')}`);
