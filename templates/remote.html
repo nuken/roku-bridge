@@ -8,156 +8,69 @@
 	<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <style>
         :root {
-            --bg-color: #2c2c2c;
-            --surface-color: #3a3a3a;
-            --primary-color: #7dd3fc;
-            --text-color: #e0e0e0;
-            --border-color: #4a4a4a;
-            --button-color: #007bff;
-            --button-hover-color: #0056b3;
-            --error-color: #dc3545;
+            --bg-color: #2c2c2c; --surface-color: #3a3a3a; --primary-color: #7dd3fc;
+            --text-color: #e0e0e0; --border-color: #4a4a4a; --button-color: #007bff;
+            --button-hover-color: #0056b3; --error-color: #dc3545;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
+            background-color: var(--bg-color); color: var(--text-color); display: flex;
+            flex-direction: column; align-items: center; padding: 20px;
+            min-height: 100vh; box-sizing: border-box; margin: 0;
             -webkit-tap-highlight-color: transparent;
         }
+        .header-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 20px; width: 100%; max-width: 320px; }
+        .nav-buttons a { background-color: var(--button-color); color: white; padding: 10px 15px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; text-decoration: none; transition: background-color 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .nav-buttons a:hover { background-color: var(--button-hover-color); }
         .remote-container {
-            background-color: var(--surface-color);
-            border-radius: 20px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
-            width: 100%;
-            max-width: 320px;
+            background-color: var(--surface-color); border-radius: 20px; padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4); width: 100%; max-width: 320px;
             box-sizing: border-box;
         }
-        h1 {
-            text-align: center;
-            color: var(--primary-color);
-            margin-top: 0;
-            margin-bottom: 20px;
-            font-size: 1.5em;
-        }
-        .device-selector {
-            margin-bottom: 25px;
-        }
+        h1 { text-align: center; color: var(--primary-color); margin-top: 0; margin-bottom: 20px; font-size: 1.5em; }
+        .device-selector { margin-bottom: 25px; }
         .device-selector select {
-            width: 100%;
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid #555;
-            background-color: var(--border-color);
-            color: var(--text-color);
-            font-size: 1em;
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
+            width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #555;
+            background-color: var(--border-color); color: var(--text-color); font-size: 1em;
+            -webkit-appearance: none; -moz-appearance: none; appearance: none;
             background-image: url('data:image/svg+xml;utf8,<svg fill="%23e0e0e0" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
-            background-repeat: no-repeat;
-            background-position: right 10px center;
+            background-repeat: no-repeat; background-position: right 10px center;
         }
-        .keyboard-section {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 25px;
-        }
+        .keyboard-section { display: flex; gap: 10px; margin-bottom: 25px; }
         .keyboard-section input[type="text"] {
-            flex-grow: 1;
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid #555;
-            background-color: var(--border-color);
-            color: var(--text-color);
-            font-size: 1em;
-            min-width: 0;
+            flex-grow: 1; padding: 12px; border-radius: 12px; border: 1px solid #555;
+            background-color: var(--border-color); color: var(--text-color); font-size: 1em; min-width: 0;
         }
         .keyboard-section button {
-            padding: 12px;
-            border-radius: 12px;
-            border: none;
-            background-color: var(--button-color);
-            color: white;
-            font-size: 1em;
-            cursor: pointer;
-            transition: background-color 0.2s;
+            padding: 12px; border-radius: 12px; border: none;
+            background-color: var(--button-color); color: white; font-size: 1em;
+            cursor: pointer; transition: background-color 0.2s;
         }
-        .keyboard-section button:hover {
-            background-color: var(--button-hover-color);
-        }
-        .grid-container {
-            display: grid;
-            gap: 15px;
-        }
-        .button-row {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            justify-items: center;
-        }
-        .d-pad {
-            grid-template-columns: repeat(3, 1fr);
-            grid-template-rows: repeat(3, 1fr);
-            gap: 15px;
-            display: grid;
-        }
+        .keyboard-section button:hover { background-color: var(--button-hover-color); }
+        .grid-container { display: grid; gap: 15px; }
+        .button-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; justify-items: center; }
+        .d-pad { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 15px; display: grid; }
         .remote-button {
-            background-color: #555;
-            color: #fff;
-            border: none;
-            border-radius: 50%;
-            width: 65px;
-            height: 65px;
-            font-size: 1.5em;
-            cursor: pointer;
-            transition: background-color 0.2s, transform 0.1s;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            background-color: #555; color: #fff; border: none; border-radius: 50%;
+            width: 65px; height: 65px; font-size: 1.5em; cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s; display: flex;
+            justify-content: center; align-items: center;
         }
-        .remote-button:active {
-            background-color: #777;
-            transform: scale(0.95);
-        }
-        /* --- Style for Red Power Button --- */
-        #button-reboot {
-            background-color: var(--error-color);
-        }
-        #button-reboot:hover {
-            background-color: #c82333; /* A darker red for hover */
-        }
-        .d-pad .remote-button {
-            border-radius: 15px;
-        }
+        .remote-button:active { background-color: #777; transform: scale(0.95); }
+        #button-reboot { background-color: var(--error-color); }
+        #button-reboot:hover { background-color: #c82333; }
+        .d-pad .remote-button { border-radius: 15px; }
         #button-up { grid-area: 1 / 2 / 2 / 3; }
         #button-left { grid-area: 2 / 1 / 3 / 2; }
         #button-ok { grid-area: 2 / 2 / 3 / 3; background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; font-size: 1.2em; }
         #button-right { grid-area: 2 / 3 / 3 / 4; }
         #button-down { grid-area: 3 / 2 / 4 / 3; }
-
         .notification {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            z-index: 1001;
-            opacity: 0;
-            transition: opacity 0.5s;
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background-color: #4CAF50; color: white; padding: 10px 20px;
+            border-radius: 8px; z-index: 1001; opacity: 0; transition: opacity 0.5s;
         }
-        .notification.show {
-            opacity: 1;
-        }
-        
-        /* --- Modal Styles --- */
+        .notification.show { opacity: 1; }
         .modal {
             display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
             overflow: auto; background-color: rgba(0,0,0,0.6);
@@ -165,8 +78,7 @@
         }
         .modal-content {
             background-color: var(--surface-color); padding: 25px; border-radius: 12px;
-            width: 90%; max-width: 400px; box-shadow: 0 5px 20px rgba(0,0,0,0.5);
-            text-align: center;
+            width: 90%; max-width: 400px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center;
         }
         .modal-header { 
             display: flex; justify-content: space-between; align-items: center; 
@@ -184,10 +96,16 @@
         .modal-button.confirm { background-color: var(--error-color); color: white; }
         .modal-button.cancel:hover { background-color: #5a6268; }
         .modal-button.confirm:hover { background-color: #c82333; }
-
     </style>
 </head>
 <body>
+    <div class="header-actions">
+        <div class="nav-buttons">
+            <a href="/status">Status</a>
+            <a href="/preview">Live TV</a>
+            <a href="/pretune">On-Demand</a>
+        </div>
+    </div>
     <div class="remote-container">
         <h1><i class="fa-solid fa-satellite-dish"></i> Roku Remote</h1>
         <div class="device-selector">
@@ -262,7 +180,7 @@
 
         async function loadDevices() {
             try {
-                const response = await fetch('/remote/devices');
+                const response = await fetch(window.location.origin + '/remote/devices');
                 const devices = await response.json();
                 deviceSelect.innerHTML = '<option value="">Select a Roku Device</option>';
                 devices.forEach(device => {
@@ -299,7 +217,7 @@
             }
             try {
                 const encodedKey = encodeURIComponent(key);
-                const response = await fetch(`/remote/keypress/${selectedDeviceIp}/${encodedKey}`, { method: 'POST' });
+                const response = await fetch(`${window.location.origin}/remote/keypress/${selectedDeviceIp}/${encodedKey}`, { method: 'POST' });
                 const result = await response.json();
                 if (result.status !== 'success') {
                     showNotification(`Error: ${result.message}`);
@@ -327,7 +245,6 @@
             textInput.value = '';
         }
 
-        // --- Modal and Reboot Functions ---
         const rebootModal = document.getElementById('reboot-modal');
 
         function openRebootModal() {
@@ -348,7 +265,7 @@
 
         async function confirmReboot() {
             try {
-                const response = await fetch(`/remote/reboot/${selectedDeviceIp}`, { method: 'POST' });
+                const response = await fetch(`${window.location.origin}/remote/reboot/${selectedDeviceIp}`, { method: 'POST' });
                 const result = await response.json();
                 if (result.status === 'success') {
                     showNotification('Reboot command sent!');

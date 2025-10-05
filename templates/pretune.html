@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Roku Pre-Tuning</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #2c2c2c; --surface-color: #3a3a3a; --primary-color: #7dd3fc;
+            --text-color: #e0e0e0; --border-color: #4a4a4a; --button-color: #555;
+            --success-color: #28a745; --error-color: #dc3545; --warn-color: #ffc107;
+            --available-color: #28a745; --in-use-color: #ffc107; --pre-tuning-color: #007bff;
+        }
+        html, body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color); color: var(--text-color);
+            margin: 0; padding: 0; height: 100%; overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .pretune-container { display: flex; flex-direction: column; width: 100%; height: 100%; }
+        .video-wrapper { position: relative; width: 100%; flex-grow: 1; background-color: #000; }
+        video { width: 100%; height: 100%; object-fit: contain; }
+        .controls-wrapper { background-color: var(--surface-color); padding: 15px; box-sizing: border-box; }
+        .app-launcher select {
+            width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #555;
+            background-color: var(--border-color); color: var(--text-color); font-size: 1em;
+            margin-bottom: 15px; -webkit-appearance: none; appearance: none;
+        }
+        #send-to-channels, #stop-session {
+             width: 100%; padding: 15px; border-radius: 12px; border: none; font-size: 1.2em;
+             color: white; cursor: pointer; margin-top: 10px;
+        }
+        #send-to-channels { background-color: var(--success-color); }
+        #stop-session { background-color: var(--error-color); }
+        .remote-button {
+            background-color: var(--button-color); color: #fff; border: none;
+            border-radius: 50%; width: 60px; height: 60px; font-size: 1.5em;
+            cursor: pointer; display: flex; justify-content: center; align-items: center;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        .remote-button:active { transform: scale(0.95); background-color: #777; }
+        #button-ok { background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; }
+        .full-remote { display: none; }
+        .grid-container { display: grid; gap: 15px; margin-top: 20px; }
+        .button-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; justify-items: center; }
+        .d-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 15px; }
+        .d-pad .remote-button { border-radius: 15px; }
+        #full-remote-up { grid-area: 1 / 2 / 2 / 3; } #full-remote-left { grid-area: 2 / 1 / 3 / 2; }
+        #full-remote-ok { grid-area: 2 / 2 / 3 / 3; background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; font-size: 1.2em; }
+        #full-remote-right { grid-area: 2 / 3 / 3 / 4; } #full-remote-down { grid-area: 3 / 2 / 4 / 3; }
+        .remote-overlay {
+            position: absolute; bottom: 0; left: 0; right: 0; padding: 15px;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0));
+            display: grid; grid-template-areas: ". up ." "left ok right" ". down .";
+            grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+            gap: 10px; justify-items: center; align-items: center;
+            opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        }
+        #button-up-overlay { grid-area: up; } #button-left-overlay { grid-area: left; }
+        #button-ok-overlay { grid-area: ok; } #button-right-overlay { grid-area: right; }
+        #button-down-overlay { grid-area: down; } #button-back-overlay { position: absolute; top: 20px; left: 20px; }
+        .video-wrapper:hover .remote-overlay, .remote-overlay.active { opacity: 1; pointer-events: auto; }
+        .notification {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px;
+            border-radius: 8px; z-index: 1001; color: white; opacity: 0; transition: opacity 0.5s, top 0.5s;
+        }
+        .notification.show { opacity: 1; top: 30px; }
+        
+        .tuner-list { list-style: none; padding: 0; margin: 0 0 20px 0; }
+        .tuner-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 8px; margin-bottom: 8px; background-color: var(--border-color); }
+        .tuner-item .status { font-weight: bold; padding: 4px 8px; border-radius: 5px; font-size: 0.9em; }
+        .tuner-item .status.available { color: var(--available-color); }
+        .tuner-item .status.in-use { color: var(--in-use-color); }
+        .tuner-item .status.pre-tuning { color: var(--pre-tuning-color); }
+        .tuner-item button { padding: 8px 12px; border: none; border-radius: 6px; color: white; cursor: pointer; }
+        .tuner-item button.start { background-color: var(--available-color); }
+        .tuner-item button.takeover { background-color: var(--warn-color); }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); align-items: center; justify-content: center; }
+        .modal-content { background-color: var(--surface-color); padding: 25px; border-radius: 12px; width: 90%; max-width: 400px; text-align: center; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .modal-button { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; }
+        .modal-button.cancel { background-color: #6c757d; color: white; }
+        .modal-button.confirm { background-color: var(--warn-color); color: #111; }
+        
+        @media (min-width: 769px) {
+            .pretune-container { flex-direction: row; }
+            .controls-wrapper { width: 30%; max-width: 400px; overflow-y: auto; }
+            .video-wrapper { width: 70%; }
+            .remote-overlay { display: none; }
+            .full-remote { display: block; }
+        }
+    </style>
+</head>
+<body>
+    <div class="pretune-container">
+        <div class="controls-wrapper">
+             <h1><i class="fa-solid fa-satellite-dish"></i> Pre-Tune Control</h1>
+             <div id="tuner-list-container">
+                <h3>Select a Tuner</h3>
+                <div id="tuner-list"></div>
+             </div>
+             <hr style="border-color: var(--border-color); margin: 20px 0;">
+             <div class="app-launcher">
+                <select id="app-launcher" onchange="launchApp()">
+                    <option value="">-- Launch an App --</option>
+                    {% for app in ondemand_apps %}
+                        <option value="{{ app.roku_app_id }}">{{ app.name }}</option>
+                    {% endfor %}
+                </select>
+             </div>
+             <div class="full-remote">
+                <div class="grid-container">
+                    <div class="button-row">
+                        <button class="remote-button" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                        <button class="remote-button" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
+                        <button class="remote-button" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
+                    </div>
+                    <div class="d-pad">
+                        <button class="remote-button" id="full-remote-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                        <button class="remote-button" id="full-remote-left" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                        <button class="remote-button" id="full-remote-ok" onclick="sendKey('Select')">OK</button>
+                        <button class="remote-button" id="full-remote-right" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                        <button class="remote-button" id="full-remote-down" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+                    </div>
+                    <div class="button-row">
+                        <button class="remote-button" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
+                        <button class="remote-button" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                        <button class="remote-button" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
+                    </div>
+                </div>
+             </div>
+             <button id="send-to-channels" onclick="sendToChannels()">Send to Channels DVR</button>
+             <button id="stop-session" onclick="stopSession()">Stop Session & Release Tuner</button>
+        </div>
+        <div class="video-wrapper">
+            <video id="video-player" autoplay muted playsinline></video>
+            <div class="remote-overlay">
+                 <button class="remote-button" id="button-back-overlay" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                 <button class="remote-button" id="button-up-overlay" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                 <button class="remote-button" id="button-left-overlay" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                 <button class="remote-button" id="button-ok-overlay" onclick="sendKey('Select')">OK</button>
+                 <button class="remote-button" id="button-right-overlay" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                 <button class="remote-button" id="button-down-overlay" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="takeover-modal" class="modal">
+        <div class="modal-content">
+            <h3>Confirm Takeover</h3>
+            <p>This tuner is already in a pre-tuning session. Do you want to end that session and start a new one?</p>
+            <div class="modal-footer">
+                <button class="modal-button cancel" onclick="closeModal()">Cancel</button>
+                <button class="modal-button confirm" id="confirm-takeover-btn">Takeover</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('video-player');
+        const remoteOverlay = document.querySelector('.remote-overlay');
+        let player, activeTunerIp = null;
+        
+        function showNotification(message, type = 'success') {
+            const n = document.createElement('div');
+            n.className = `notification`;
+            const color = type === 'error' ? 'var(--error-color)' : (type === 'warn' ? 'var(--warn-color)' : 'var(--success-color)');
+            n.style.backgroundColor = color;
+            n.textContent = message; document.body.appendChild(n);
+            setTimeout(() => n.classList.add('show'), 10);
+            setTimeout(() => { n.classList.remove('show'); n.addEventListener('transitionend', () => n.remove()); }, 4000);
+        }
+
+        function cleanupPlayer() {
+            if (player) {
+                player.unload();
+                player.detachMediaElement();
+                player.destroy();
+                player = null;
+            }
+            videoElement.src = "";
+        }
+
+        async function fetchTunerStatus() {
+            try {
+                const response = await fetch(window.location.origin + '/api/pretune/status');
+                const tuners = await response.json();
+                renderTunerList(tuners);
+            } catch (error) {
+                console.error("Failed to fetch tuner status:", error);
+                document.getElementById('tuner-list').innerHTML = '<p style="color: var(--error-color);">Error loading tuners.</p>';
+            }
+        }
+        
+        function renderTunerList(tuners) {
+            const listEl = document.getElementById('tuner-list');
+            if (!tuners || tuners.length === 0) {
+                listEl.innerHTML = "<p>No tuners configured.</p>";
+                return;
+            }
+            listEl.innerHTML = tuners.map(tuner => `
+                <div class="tuner-item">
+                    <span>${tuner.name}</span>
+                    <span class="status ${tuner.status}">${tuner.status.replace('-', ' ')}</span>
+                    ${tuner.status === 'available' ? `<button class="start" onclick="handleSessionStart('${tuner.roku_ip}', false)">Start</button>` : ''}
+                    ${tuner.status === 'pre-tuning' ? `<button class="takeover" onclick="handleSessionStart('${tuner.roku_ip}', true)">Takeover</button>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function handleSessionStart(tunerIp, isTakeover) {
+            if (isTakeover) {
+                const modal = document.getElementById('takeover-modal');
+                modal.style.display = 'flex';
+                const confirmBtn = document.getElementById('confirm-takeover-btn');
+                confirmBtn.onclick = () => {
+                    closeModal();
+                    startSession(tunerIp, true);
+                };
+            } else {
+                startSession(tunerIp, false);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('takeover-modal').style.display = 'none';
+        }
+
+        async function startSession(tunerIp, isTakeover) {
+            if (activeTunerIp && activeTunerIp !== tunerIp) {
+                await stopSession(); // Stop previous session if switching
+            }
+            
+            if(isTakeover) {
+                await stopSession(tunerIp, true); // Stop the specific tuner without clearing UI
+            }
+
+            cleanupPlayer();
+            try {
+                const response = await fetch(window.location.origin + '/api/pretune/start', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tuner_ip: tunerIp })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    activeTunerIp = data.roku_ip;
+                    const streamUrl = `${window.location.origin}/api/pretune/stream?tuner_ip=${data.roku_ip}`;
+                    if (mpegts.isSupported()) {
+                        player = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: streamUrl });
+                        player.attachMediaElement(videoElement);
+                        player.load();
+                        player.play();
+                    }
+                    showNotification(`Session started on tuner: ${data.tuner_name}`);
+                } else { throw new Error(data.message || 'Unknown error'); }
+            } catch (error) { showNotification(`Error starting session: ${error.message}`, 'error'); }
+            fetchTunerStatus();
+        }
+        
+        async function launchApp() {
+            if (!activeTunerIp) { showNotification('Please start a session on a tuner first.', 'warn'); return; }
+            const appId = document.getElementById('app-launcher').value;
+            if (!appId) return;
+            try {
+                await fetch(`${window.location.origin}/remote/launch/${activeTunerIp}/${appId}`, { method: 'POST' });
+            } catch (error) { showNotification('Failed to launch app.', 'error'); }
+        }
+
+        async function sendKey(key) {
+            if (!activeTunerIp) { showNotification('No active session.', 'error'); return; }
+            try {
+                await fetch(`${window.location.origin}/remote/keypress/${activeTunerIp}/${encodeURIComponent(key)}`, { method: 'POST' });
+            } catch (error) { console.error(`Failed to send key ${key}:`, error); }
+        }
+        
+        async function sendToChannels() {
+            if (!activeTunerIp) { showNotification('Please start a session and select content first.', 'error'); return; }
+            try {
+                const response = await fetch(window.location.origin + '/api/pretune/commit', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tuner_ip: activeTunerIp })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showNotification(data.message, 'success');
+                    cleanupPlayer();
+                    activeTunerIp = null;
+                    document.getElementById('app-launcher').value = '';
+                } else { throw new Error(data.error || 'Failed to send to Channels'); }
+            } catch(error) { showNotification(error.message, 'error'); }
+            fetchTunerStatus();
+        }
+
+        async function stopSession(tunerToStop = null, silent = false) {
+            const tunerIp = tunerToStop || activeTunerIp;
+            if (!tunerIp) {
+                if(!silent) showNotification('No active session to stop.', 'info');
+                return;
+            }
+            if (!tunerToStop) {
+                 cleanupPlayer();
+                 activeTunerIp = null;
+                 document.getElementById('app-launcher').value = '';
+            }
+            try {
+                await fetch(window.location.origin + '/api/pretune/stop', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tuner_ip: tunerIp })
+                });
+                if(!silent) showNotification('Session stopped and tuner released.', 'success');
+            } catch(error) {
+                if(!silent) showNotification('Failed to stop session.', 'error');
+            }
+            fetchTunerStatus();
+        }
+        
+        window.addEventListener('beforeunload', () => {
+            if (activeTunerIp) {
+                const payload = JSON.stringify({ tuner_ip: activeTunerIp });
+                navigator.sendBeacon(window.location.origin + '/api/pretune/stop', payload);
+            }
+        });
+
+        videoElement.addEventListener('click', () => remoteOverlay.classList.toggle('active'));
+        document.addEventListener('DOMContentLoaded', fetchTunerStatus);
+        setInterval(fetchTunerStatus, 15000);
+    </script>
+</body>
+</html>
+
