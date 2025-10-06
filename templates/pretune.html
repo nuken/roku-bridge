@@ -46,8 +46,17 @@
         .button-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; justify-items: center; }
         .d-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 15px; }
         .d-pad .remote-button { border-radius: 15px; }
-        #full-remote-ok { background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; }
+        #full-remote-up { grid-area: 1 / 2 / 2 / 3; }
+        #full-remote-left { grid-area: 2 / 1 / 3 / 2; }
+        #full-remote-ok { grid-area: 2 / 2 / 3 / 3; background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; }
+        #full-remote-right { grid-area: 2 / 3 / 3 / 4; }
+        #full-remote-down { grid-area: 3 / 2 / 4 / 3; }
         .remote-overlay { position: absolute; bottom: 0; left: 0; right: 0; padding: 15px; background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0)); display: grid; grid-template-areas: ". up ." "left ok right" ". down ."; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 10px; justify-items: center; align-items: center; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        #button-up-overlay { grid-area: up; }
+        #button-left-overlay { grid-area: left; }
+        #button-ok-overlay { grid-area: ok; }
+        #button-right-overlay { grid-area: right; }
+        #button-down-overlay { grid-area: down; }
         #button-back-overlay { position: absolute; top: 20px; left: 20px; }
         .video-wrapper:hover .remote-overlay, .remote-overlay.active { opacity: 1; pointer-events: auto; }
         .notification { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: 8px; z-index: 1001; color: white; opacity: 0; transition: opacity 0.5s, top 0.5s; }
@@ -109,7 +118,7 @@
                     <div class="button-row">
                         <button class="remote-button" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
                         <button class="remote-button" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
-                        <button class="remote-button" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
+                        <button class="remote-button" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
                     </div>
                     <div class="d-pad">
                         <button class="remote-button" id="full-remote-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
@@ -120,8 +129,8 @@
                     </div>
                     <div class="button-row">
                         <button class="remote-button" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
-                        <button class="remote-button" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
                         <button class="remote-button" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
+                        <button class="remote-button" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
                     </div>
                 </div>
              </div>
@@ -299,7 +308,6 @@
                  recordingOptions.style.display = 'none';
                  recordCheckbox.checked = false;
                  metadataGroup.style.display = 'none';
-                 // Clear fields
                  document.getElementById('title-input').value = '';
                  document.getElementById('subtitle-input').value = '';
                  document.getElementById('description-input').value = '';
@@ -326,7 +334,7 @@
         }
 
         async function sendKey(key) {
-            if (!activeTunerIp) { showNotification('No active session.', 'error'); return; }
+            if (!activeTunerIp) { return; }
             try { await fetch(`/remote/keypress/${activeTunerIp}/${encodeURIComponent(key)}`, { method: 'POST' }); }
             catch (error) { console.error(`Failed to send key ${key}:`, error); }
         }
@@ -429,7 +437,7 @@
                 if (!response.ok) throw new Error(data.message || 'Failed to commit stream.');
                 
                 showNotification(data.message, 'success');
-                await stopSession(activeTunerIp, true);
+                await stopSession(null, true);
                 
             } catch (error) { showNotification(`Error: ${error.message}`, 'error'); }
         }
