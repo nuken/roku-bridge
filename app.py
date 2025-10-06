@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.8.3-fix"
+APP_VERSION = "4.8.4-fix"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -236,7 +236,26 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
             return
 
         tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
-        ondemand_channel_id = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
+        
+        # Get the list of channels from the DVR
+        try:
+            dvr_channels_res = requests.get(f"http://{CHANNELS_DVR_IP}:8089/devices/ANY/channels", timeout=10)
+            dvr_channels_res.raise_for_status()
+            dvr_channels = dvr_channels_res.json()
+        except Exception as e:
+            logging.error(f"[Recording] Failed to get channels from DVR at {CHANNELS_DVR_IP}: {e}")
+            return
+            
+        # Find the correct channel ID
+        ondemand_channel_id = None
+        for channel in dvr_channels:
+            if channel.get('GuideName') == f"On-Demand Stream ({tuner_name})":
+                ondemand_channel_id = channel.get('ID')
+                break
+        
+        if not ondemand_channel_id:
+            logging.error(f"[Recording] Could not find on-demand channel for tuner {tuner_name} in Channels DVR.")
+            return
 
         try:
             recording_payload = {
