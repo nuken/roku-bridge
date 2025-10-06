@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.9.7-fix"
+APP_VERSION = "4.9.8-fix"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -233,7 +233,6 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
         
         if not CHANNELS_DVR_IP:
             logging.error("[Recording] Channels DVR IP is not configured. Cannot send record command.")
-            release_tuner(tuner_ip)
             return
 
         tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
@@ -245,7 +244,6 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
             dvr_channels = dvr_channels_res.json()
         except Exception as e:
             logging.error(f"[Recording] Failed to get channels from DVR at {CHANNELS_DVR_IP}: {e}")
-            release_tuner(tuner_ip)
             return
             
         # Find the correct channel ID
@@ -257,7 +255,6 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
         
         if not ondemand_channel_id:
             logging.error(f"[Recording] Could not find on-demand channel for tuner {tuner_name} in Channels DVR.")
-            release_tuner(tuner_ip)
             return
 
         try:
@@ -290,15 +287,11 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
             record_res.raise_for_status()
             logging.info(f"[Recording] Successfully sent record command to DVR for tuner {tuner_ip}.")
             
-            # The tuner will be released automatically by the stream_generator when the DVR disconnects
-            
         except Exception as e:
             logging.error(f"[Recording] Failed to send record command to DVR at {CHANNELS_DVR_IP}: {e}")
-            release_tuner(tuner_ip)
             
     except Exception as e:
         logging.error(f"An unexpected error occurred in the recording thread: {e}")
-        release_tuner(tuner_ip)
 
 def start_preview_session(tuner_ip):
     with TUNER_LOCK:
