@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.9.5-fix"
+APP_VERSION = "4.9.6-fix"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -287,16 +287,14 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
             record_res.raise_for_status()
             logging.info(f"[Recording] Successfully sent record command to DVR for tuner {tuner_ip}.")
             
-            # Release the tuner immediately after the recording command is sent
-            release_tuner(tuner_ip)
+            # Give the DVR a moment to lock the tuner before we release it
+            time.sleep(5)
             
         except Exception as e:
             logging.error(f"[Recording] Failed to send record command to DVR at {CHANNELS_DVR_IP}: {e}")
-            # Still release the tuner if the API call fails
-            release_tuner(tuner_ip)
-
-    except Exception as e:
-        logging.error(f"An unexpected error occurred in the recording thread: {e}")
+            
+    finally:
+        # Always release the tuner, whether the recording command succeeded or failed
         release_tuner(tuner_ip)
 
 def start_preview_session(tuner_ip):
