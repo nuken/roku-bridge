@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.8.1-fix"
+APP_VERSION = "4.8.2-fix"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -58,6 +58,7 @@ ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00' + b'\xff' * 175
 TMDB_API_KEY = ''
+CHANNELS_DVR_IP = ''
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
@@ -79,13 +80,13 @@ executor = ThreadPoolExecutor(max_workers=10)
 # --- Core Application Logic ---
 
 def load_config():
-    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY
+    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY, CHANNELS_DVR_IP
     if not os.path.exists(CONFIG_FILE_PATH):
         logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating default.")
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""}, f, indent=2)
+                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": ""}, f, indent=2)
         except Exception as e:
             logging.error(f"Could not create default config: {e}")
     try:
@@ -97,10 +98,12 @@ def load_config():
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
         ONDEMAND_SETTINGS = config_data.get('ondemand_settings', {})
         TMDB_API_KEY = config_data.get('tmdb_api_key', '')
+        CHANNELS_DVR_IP = config_data.get('channels_dvr_ip', '')
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
-        if TMDB_API_KEY:
-            logging.info("TMDb API Key is configured.")
+        if TMDB_API_KEY: logging.info("TMDb API Key is configured.")
+        if CHANNELS_DVR_IP: logging.info(f"Channels DVR IP is configured: {CHANNELS_DVR_IP}")
+
     except Exception as e:
         logging.error(f"Error loading config: {e}")
 
@@ -222,14 +225,14 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info):
+def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_event):
     try:
         logging.info(f"Recording task started for {tuner_ip}, duration: {duration_minutes} mins.")
         
-        dvr_info['event'].wait(timeout=30)
-        dvr_ip = dvr_info.get('ip')
-        if not dvr_ip:
-            logging.error(f"[Recording] DVR did not connect to the stream for {tuner_ip} within the timeout.")
+        dvr_info_event.wait(timeout=30)
+        
+        if not CHANNELS_DVR_IP:
+            logging.error("[Recording] Channels DVR IP is not configured. Cannot send record command.")
             return
 
         tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
@@ -245,11 +248,11 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info):
                 }
             }
             recording_payload["Airing"] = {k: v for k, v in recording_payload["Airing"].items() if v}
-            record_res = requests.post(f"http://{dvr_ip}:8089/dvr/jobs/new", json=recording_payload, timeout=10)
+            record_res = requests.post(f"http://{CHANNELS_DVR_IP}:8089/dvr/jobs/new", json=recording_payload, timeout=10)
             record_res.raise_for_status()
             logging.info(f"[Recording] Successfully sent record command to DVR for tuner {tuner_ip}.")
         except Exception as e:
-            logging.error(f"[Recording] Failed to send record command to DVR at {dvr_ip}: {e}")
+            logging.error(f"[Recording] Failed to send record command to DVR at {CHANNELS_DVR_IP}: {e}")
             return
 
         logging.info(f"[Recording] Timer started. Will release tuner {tuner_ip} in {duration_minutes} minutes.")
@@ -271,7 +274,7 @@ def start_preview_session(tuner_ip):
         PREVIEW_SESSIONS[tuner_ip] = {
             'tuner': tuner, 
             'committed': False, 
-            'dvr_info': {'event': threading.Event(), 'ip': None}
+            'dvr_info_event': threading.Event()
         }
         logging.info(f"Started preview session on tuner {tuner['name']}")
         return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip']}
@@ -290,7 +293,7 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
         
         if record and duration > 0:
             logging.info(f"Committing preview session for tuner {tuner_name} WITH recording for {duration} minutes.")
-            recording_thread = threading.Thread(target=handle_ondemand_recording, args=(tuner_ip, duration, metadata, session['dvr_info']))
+            recording_thread = threading.Thread(target=handle_ondemand_recording, args=(tuner_ip, duration, metadata, session['dvr_info_event']))
             recording_thread.daemon = True
             recording_thread.start()
             RECORDING_TASKS[tuner_ip] = recording_thread
@@ -329,8 +332,7 @@ def stream_ondemand():
         session = PREVIEW_SESSIONS.get(tuner_ip)
         if not session or not session['committed']: return "No pre-tuned stream is ready.", 404
         tuner = session['tuner']
-        session['dvr_info']['ip'] = request.remote_addr
-        session['dvr_info']['event'].set()
+        session['dvr_info_event'].set()
 
     logging.info(f"Channels DVR ({request.remote_addr}) connected to committed stream from tuner {tuner['name']}")
     
@@ -422,7 +424,7 @@ def api_config():
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
             return jsonify(config_data)
         except FileNotFoundError:
-            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "" })
+            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": "" })
         except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])

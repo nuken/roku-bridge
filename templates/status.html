@@ -101,6 +101,18 @@
                 {% endif %}
             </p>
         </div>
+
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
+            <h2><i class="fa-solid fa-server"></i> Channels DVR</h2>
+        </div>
+        <div class="global-settings">
+            <p>Configure the IP address of your Channels DVR server for On-Demand recording.</p>
+            <div class="form-group">
+                <label for="channels-dvr-ip">Channels DVR IP Address</label>
+                <input type="text" id="channels-dvr-ip" placeholder="e.g., 192.168.1.100">
+            </div>
+        </div>
+
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-satellite-dish"></i> Tuners</h2></div>
         <div class="table-wrapper"><table id="tuners-table"><thead><tr><th>Name</th><th>Roku IP</th><th>Encoder URL</th><th>Priority</th><th>Encoding Mode</th><th>Actions</th></tr></thead><tbody id="tuners-table-body"></tbody></table></div>
         <button class="button" onclick="openTunerModal()"><i class="fa-solid fa-plus"></i> Add Tuner</button>
@@ -213,7 +225,7 @@
     </div>
 
     <script>
-        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [], ondemand_settings: {}, tmdb_api_key: '' };
+        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [], ondemand_settings: {}, tmdb_api_key: '', channels_dvr_ip: '' };
         let availablePlugins = [];
         const epgOptionalFields = [ 'channel-number', 'tvg-logo', 'tvc-guide-art', 'tvc-guide-title', 'tvc-guide-description', 'tvc-guide-tags', 'tvc-guide-genres', 'tvc-guide-categories', 'tvc-guide-placeholders', 'tvc-stream-vcodec', 'tvc-stream-acodec', 'tune_delay' ];
 
@@ -249,16 +261,22 @@
                     document.getElementById('ondemand-settings-art').value = appConfig.ondemand_settings.tvc_guide_art || '';
                 }
                 document.getElementById('tmdb-api-key').value = appConfig.tmdb_api_key || '';
+                document.getElementById('channels-dvr-ip').value = appConfig.channels_dvr_ip || '';
+
             } catch (error) { console.error('Failed to load config:', error); showNotification('Error loading configuration.', 'error'); }
         }
 
         async function saveAllChanges() {
             try {
+                // Ensure appConfig is initialized
+                if (!appConfig) appConfig = {};
+                
                 appConfig.ondemand_settings = {
                     tvg_logo: document.getElementById('ondemand-settings-logo').value,
                     tvc_guide_art: document.getElementById('ondemand-settings-art').value
                 };
                 appConfig.tmdb_api_key = document.getElementById('tmdb-api-key').value;
+                appConfig.channels_dvr_ip = document.getElementById('channels-dvr-ip').value;
 
                 const response = await fetch(window.location.origin + '/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appConfig) });
                 const result = await response.json();
@@ -287,35 +305,11 @@
                 }
             }
 
-            const textArea = document.createElement('textarea');
-            textArea.value = fullUrl;
-            textArea.style.position = 'fixed';
-            textArea.style.top = 0;
-            textArea.style.left = 0;
-            textArea.style.width = '2em';
-            textArea.style.height = '2em';
-            textArea.style.padding = 0;
-            textArea.style.border = 'none';
-            textArea.style.outline = 'none';
-            textArea.style.boxShadow = 'none';
-            textArea.style.background = 'transparent';
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-
-            try {
-                const successful = document.execCommand('copy');
-                if (successful) {
-                    showNotification('URL copied to clipboard!', 'success');
-                } else {
-                    showNotification('Failed to copy URL.', 'error');
-                }
-            } catch (err) {
-                console.error('Copy command failed:', err);
+            navigator.clipboard.writeText(fullUrl).then(() => {
+                showNotification('URL copied to clipboard!', 'success');
+            }).catch(err => {
                 showNotification('Failed to copy URL.', 'error');
-            }
-
-            document.body.removeChild(textArea);
+            });
         }
 
         function renderAllTables() {
@@ -556,7 +550,7 @@
 
         function showNotification(message, type = 'success') {
             const n = document.createElement('div');
-            n.className = `notification`; n.style.backgroundColor = type === 'error' ? 'var(--error-color)' : 'var(--success-color)';
+            n.className = `notification`; n.style.backgroundColor = type === 'error' ? 'var(--error-color)' : (type === 'warn' ? 'var(--warn-color)' : 'var(--success-color)');
             n.textContent = message; document.body.appendChild(n);
             setTimeout(() => n.classList.add('show'), 10);
             setTimeout(() => { n.classList.remove('show'); n.addEventListener('transitionend', () => n.remove()); }, 4000);
@@ -582,22 +576,6 @@
                 const tooltipText = tooltipIcon.querySelector('.tooltiptext');
                 if (!tooltipText) return;
                 tooltipText.classList.add('visible');
-                const textRect = tooltipText.getBoundingClientRect();
-                const container = tooltipIcon.closest('.modal-body') || document.body;
-                const containerRect = container.getBoundingClientRect();
-                if (textRect.top < containerRect.top + 10) {
-                    tooltipText.style.bottom = 'auto';
-                    tooltipText.style.top = '125%';
-                }
-                if (textRect.right > containerRect.right) {
-                    tooltipText.style.left = 'auto';
-                    tooltipText.style.right = '0px';
-                    tooltipText.style.transform = 'translateX(0)';
-                } else if (textRect.left < containerRect.left) {
-                     tooltipText.style.left = '0px';
-                     tooltipText.style.right = 'auto';
-                     tooltipText.style.transform = 'translateX(0)';
-                }
             }, true);
 
             document.body.addEventListener('mouseleave', (event) => {
