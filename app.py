@@ -9,6 +9,7 @@ import threading
 import httpx
 import urllib.parse
 import signal
+import xml.etree.ElementTree as ET
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
@@ -20,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5"
+APP_VERSION = "4.7-metadata"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -66,13 +67,15 @@ AUDIO_CHANNELS = get_audio_channels()
 TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS = [], [], [], [], {}
 TUNER_LOCK = threading.Lock()
 KEEP_ALIVE_TASKS = {}
-# --- NEW: Multi-session support for pre-tuning ---
+# --- Multi-session support for pre-tuning ---
 PREVIEW_SESSIONS = {} # Keyed by tuner IP
 SESSION_LOCK = threading.Lock()
+# --- On-Demand Recording ---
+RECORDING_TASKS = {} # Keyed by tuner IP
 
 roku_session = requests.Session()
 roku_session.timeout = 3
-executor = ThreadPoolExecutor(max_workers=10) # Increased workers for more concurrent tasks
+executor = ThreadPoolExecutor(max_workers=10)
 
 # --- Core Application Logic ---
 
@@ -217,7 +220,58 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-# --- Pre-Tune Session Management ---
+# --- Pre-Tune and Recording Session Management ---
+
+def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_ip_event):
+    try:
+        logging.info(f"Recording task started for {tuner_ip}, duration: {duration_minutes} mins.")
+        
+        # 1. Wait for the DVR to connect
+        dvr_ip_event.wait(timeout=30)
+        dvr_ip = getattr(dvr_ip_event, 'dvr_ip', None)
+        if not dvr_ip:
+            logging.error(f"[Recording] DVR did not connect to the stream for {tuner_ip} within the timeout.")
+            return
+
+        tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
+        ondemand_channel_id = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
+
+        # 2. Send the record command with metadata
+        try:
+            recording_payload = {
+                "Name": metadata.get('title') or "On-Demand Recording",
+                "Time": 0, # Start immediately
+                "Duration": duration_minutes * 60,
+                "Channels": [ondemand_channel_id],
+                "Airing": {
+                    "Title": metadata.get('title') or "On-Demand Recording",
+                    "EpisodeTitle": metadata.get('subtitle'),
+                    "Summary": metadata.get('description'),
+                    "Image": metadata.get('image'),
+                    "Genres": ["On-Demand"],
+                }
+            }
+            # Remove empty fields from Airing
+            recording_payload["Airing"] = {k: v for k, v in recording_payload["Airing"].items() if v}
+
+            record_res = requests.post(f"http://{dvr_ip}:8089/dvr/jobs/new", json=recording_payload, timeout=10)
+            record_res.raise_for_status()
+            logging.info(f"[Recording] Successfully sent record command to DVR for tuner {tuner_ip}.")
+        except Exception as e:
+            logging.error(f"[Recording] Failed to send record command to DVR at {dvr_ip}: {e}")
+            return
+
+        # 3. Wait for the duration to elapse
+        logging.info(f"[Recording] Timer started. Will release tuner {tuner_ip} in {duration_minutes} minutes.")
+        time.sleep(duration_minutes * 60)
+        
+    finally:
+        # 4. Stop the session
+        logging.info(f"[Recording] Timer finished for {tuner_ip}. Releasing tuner.")
+        stop_preview_session(tuner_ip)
+        if tuner_ip in RECORDING_TASKS:
+            del RECORDING_TASKS[tuner_ip]
+
 def start_preview_session(tuner_ip):
     with TUNER_LOCK:
         tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
@@ -228,23 +282,33 @@ def start_preview_session(tuner_ip):
         tuner['in_use'] = True
     
     with SESSION_LOCK:
-        PREVIEW_SESSIONS[tuner_ip] = {'tuner': tuner, 'committed': False}
+        PREVIEW_SESSIONS[tuner_ip] = {'tuner': tuner, 'committed': False, 'dvr_ip_event': threading.Event()}
         logging.info(f"Started preview session on tuner {tuner['name']}")
         return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip']}
 
 def stop_preview_session(tuner_ip):
-    # This function is now just a wrapper for release_tuner for clarity
     release_tuner(tuner_ip)
     return {"status": "success", "message": "Session stopped."}
 
-def commit_preview_session(tuner_ip):
+def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
     with SESSION_LOCK:
         if tuner_ip not in PREVIEW_SESSIONS:
             return {"status": "error", "message": "No active preview session to commit."}
-        PREVIEW_SESSIONS[tuner_ip]['committed'] = True
-        tuner_name = PREVIEW_SESSIONS[tuner_ip]['tuner']['name']
-        logging.info(f"Committed preview session for tuner {tuner_name}.")
-        return {"status": "success", "message": "Stream is now ready for Channels DVR."}
+        
+        session = PREVIEW_SESSIONS[tuner_ip]
+        session['committed'] = True
+        tuner_name = session['tuner']['name']
+        
+        if record and duration > 0:
+            logging.info(f"Committing preview session for tuner {tuner_name} WITH recording for {duration} minutes.")
+            recording_thread = threading.Thread(target=handle_ondemand_recording, args=(tuner_ip, duration, metadata, session['dvr_ip_event']))
+            recording_thread.daemon = True
+            recording_thread.start()
+            RECORDING_TASKS[tuner_ip] = recording_thread
+            return {"status": "success", "message": "Stream is now ready. Recording will start when you tune in on a client."}
+        else:
+            logging.info(f"Committed preview session for tuner {tuner_name}.")
+            return {"status": "success", "message": "Stream is now ready for Channels DVR."}
 
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
@@ -279,9 +343,11 @@ def stream_ondemand():
         if not session or not session['committed']:
             return "No pre-tuned stream is ready for this tuner.", 404
         tuner = session['tuner']
-    
-    logging.info(f"Channels DVR connected to committed stream from tuner {tuner['name']}")
-    time.sleep(2) # Give a moment for connection
+        dvr_ip = request.remote_addr
+        session['dvr_ip_event'].dvr_ip = dvr_ip
+        session['dvr_ip_event'].set()
+
+    logging.info(f"Channels DVR ({dvr_ip}) connected to committed stream from tuner {tuner['name']}")
     
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
@@ -328,11 +394,7 @@ def generate_ondemand_m3u():
             extinf_line += f' tvg-logo="{ONDEMAND_SETTINGS["tvg_logo"]}"'
         if ONDEMAND_SETTINGS.get('tvc_guide_art'):
             extinf_line += f' tvc-guide-art="{ONDEMAND_SETTINGS["tvc_guide_art"]}"'
-        
-        # --- THIS IS THE FIX ---
         extinf_line += f',{channel_name}'
-        # --- END OF FIX ---
-        
         m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
@@ -432,7 +494,7 @@ def upload_plugin():
         logging.error(f"Error saving plugin: {e}")
         return f"Error saving plugin file: {e}", 500
 
-# --- NEW Pre-Tune API ---
+# --- Pre-Tune API ---
 @app.route('/api/pretune/status')
 def api_pretune_status():
     with SESSION_LOCK:
@@ -442,6 +504,8 @@ def api_pretune_status():
         tuner_status = "in-use" if tuner['in_use'] else "available"
         if tuner['roku_ip'] in active_ips:
             tuner_status = "pre-tuning"
+            if tuner['roku_ip'] in RECORDING_TASKS:
+                 tuner_status = "recording"
         status.append({
             "name": tuner.get("name", tuner['roku_ip']),
             "roku_ip": tuner['roku_ip'],
@@ -466,11 +530,65 @@ def api_pretune_stop():
 
 @app.route('/api/pretune/commit', methods=['POST'])
 def api_pretune_commit():
-    tuner_ip = request.json.get('tuner_ip')
+    data = request.get_json()
+    tuner_ip = data.get('tuner_ip')
+    record = data.get('record', False)
+    duration = data.get('duration', 0)
+    metadata = data.get('metadata', {})
     if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
-    result = commit_preview_session(tuner_ip)
+    result = commit_preview_session(tuner_ip, record, duration, metadata)
     status_code = 200 if result['status'] == 'success' else 409
     return jsonify(result), status_code
+    
+@app.route('/api/pretune/fetch_info', methods=['POST'])
+def api_fetch_info():
+    tuner_ip = request.json.get('tuner_ip')
+    if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
+    try:
+        response = requests.get(f"http://{tuner_ip}:8060/query/media-player", timeout=3)
+        response.raise_for_status()
+        
+        root = ET.fromstring(response.content)
+        player_state = root.get('state')
+        if not player_state or player_state == 'close':
+            return jsonify({"status": "nodata"})
+
+        # Try to find metadata in <plugin> for some apps, fallback to <media>
+        media_node = root.find('.//plugin') or root.find('.//media')
+        if media_node is None:
+            return jsonify({"status": "nodata"})
+
+        metadata = {}
+        title = media_node.get('title')
+        duration_str = media_node.get('duration')
+        
+        if title:
+            metadata['title'] = title
+        if duration_str:
+            try:
+                duration_seconds = float(duration_str)
+                metadata['duration'] = round(duration_seconds / 60)
+            except ValueError:
+                pass
+        
+        # Look for more details for series content
+        series_title = media_node.get('seriesTitle')
+        episode_title = media_node.get('episodeTitle')
+        if series_title and episode_title:
+             metadata['title'] = series_title
+             metadata['subtitle'] = episode_title
+
+        if not metadata:
+             return jsonify({"status": "nodata"})
+             
+        return jsonify({"status": "success", "metadata": metadata})
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch info from Roku {tuner_ip}: {e}")
+        return jsonify({"status": "error", "message": "Could not connect to Roku."}), 500
+    except ET.ParseError:
+        logging.error(f"Failed to parse XML from Roku {tuner_ip}")
+        return jsonify({"status": "nodata"})
 
 @app.route('/api/pretune/stream')
 def api_pretune_stream():
@@ -549,4 +667,3 @@ def api_plugins():
 
 if __name__ != '__main__':
     load_config()
-

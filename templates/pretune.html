@@ -13,6 +13,7 @@
             --text-color: #e0e0e0; --border-color: #4a4a4a; --button-color: #555;
             --success-color: #28a745; --error-color: #dc3545; --warn-color: #ffc107;
             --available-color: #28a745; --in-use-color: #ffc107; --pre-tuning-color: #007bff;
+            --recording-color: #9d31cc;
         }
         html, body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -29,12 +30,25 @@
             background-color: var(--border-color); color: var(--text-color); font-size: 1em;
             margin-bottom: 15px; -webkit-appearance: none; appearance: none;
         }
-        #send-to-channels, #stop-session {
+        #start-stream, #stop-session {
              width: 100%; padding: 15px; border-radius: 12px; border: none; font-size: 1.2em;
              color: white; cursor: pointer; margin-top: 10px;
         }
-        #send-to-channels { background-color: var(--success-color); }
+        #start-stream { background-color: var(--success-color); }
         #stop-session { background-color: var(--error-color); }
+        .recording-options {
+            background-color: var(--border-color); padding: 15px; border-radius: 12px;
+            margin-top: 15px; display: none;
+        }
+        .form-group-checkbox { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+        .form-group-checkbox input[type="checkbox"] { width: 20px; height: 20px; }
+        .form-group { margin-bottom: 10px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .form-group input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background-color: var(--bg-color); color: var(--text-color); font-size: 1em; box-sizing: border-box; }
+        .fetch-button {
+            width: 100%; padding: 10px; border-radius: 8px; border: none; font-size: 1em;
+            background-color: var(--pre-tuning-color); color: white; cursor: pointer; margin-bottom: 15px;
+        }
         .remote-button {
             background-color: var(--button-color); color: #fff; border: none;
             border-radius: 50%; width: 60px; height: 60px; font-size: 1.5em;
@@ -75,6 +89,7 @@
         .tuner-item .status.available { color: var(--available-color); }
         .tuner-item .status.in-use { color: var(--in-use-color); }
         .tuner-item .status.pre-tuning { color: var(--pre-tuning-color); }
+        .tuner-item .status.recording { color: var(--recording-color); }
         .tuner-item button { padding: 8px 12px; border: none; border-radius: 6px; color: white; cursor: pointer; }
         .tuner-item button.start { background-color: var(--available-color); }
         .tuner-item button.takeover { background-color: var(--warn-color); }
@@ -132,7 +147,36 @@
                     </div>
                 </div>
              </div>
-             <button id="send-to-channels" onclick="sendToChannels()">Send to Channels DVR</button>
+             <div class="recording-options" id="recording-options">
+                 <div class="form-group-checkbox">
+                    <input type="checkbox" id="record-checkbox">
+                    <label for="record-checkbox">Record on Channels DVR</label>
+                </div>
+                <div id="metadata-group" style="display: none;">
+                    <button class="fetch-button" onclick="fetchRokuInfo()"><i class="fa-solid fa-download"></i> Fetch Info From Roku</button>
+                    <div class="form-group">
+                        <label for="duration-input">Duration (minutes)</label>
+                        <input type="number" id="duration-input" value="120" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="title-input">Title</label>
+                        <input type="text" id="title-input" placeholder="e.g., The Mandalorian">
+                    </div>
+                     <div class="form-group">
+                        <label for="subtitle-input">Subtitle / Episode (Optional)</label>
+                        <input type="text" id="subtitle-input" placeholder="e.g., S01E01: The Child">
+                    </div>
+                    <div class="form-group">
+                        <label for="description-input">Description (Optional)</label>
+                        <input type="text" id="description-input" placeholder="A lone gunfighter...">
+                    </div>
+                    <div class="form-group">
+                        <label for="image-input">Image URL (Optional)</label>
+                        <input type="text" id="image-input" placeholder="https://...">
+                    </div>
+                </div>
+             </div>
+             <button id="start-stream" onclick="startStream()">Send to Channels</button>
              <button id="stop-session" onclick="stopSession()">Stop Session & Release Tuner</button>
         </div>
         <div class="video-wrapper">
@@ -151,7 +195,7 @@
     <div id="takeover-modal" class="modal">
         <div class="modal-content">
             <h3>Confirm Takeover</h3>
-            <p>This tuner is already in a pre-tuning session. Do you want to end that session and start a new one?</p>
+            <p>This tuner is already in a session. Do you want to end that session and start a new one?</p>
             <div class="modal-footer">
                 <button class="modal-button cancel" onclick="closeModal()">Cancel</button>
                 <button class="modal-button confirm" id="confirm-takeover-btn">Takeover</button>
@@ -162,6 +206,9 @@
     <script>
         const videoElement = document.getElementById('video-player');
         const remoteOverlay = document.querySelector('.remote-overlay');
+        const recordingOptions = document.getElementById('recording-options');
+        const recordCheckbox = document.getElementById('record-checkbox');
+        const metadataGroup = document.getElementById('metadata-group');
         let player, activeTunerIp = null;
         
         function showNotification(message, type = 'success') {
@@ -206,7 +253,7 @@
                     <span>${tuner.name}</span>
                     <span class="status ${tuner.status}">${tuner.status.replace('-', ' ')}</span>
                     ${tuner.status === 'available' ? `<button class="start" onclick="handleSessionStart('${tuner.roku_ip}', false)">Start</button>` : ''}
-                    ${tuner.status === 'pre-tuning' ? `<button class="takeover" onclick="handleSessionStart('${tuner.roku_ip}', true)">Takeover</button>` : ''}
+                    ${(tuner.status !== 'available' && tuner.status !== 'in-use') ? `<button class="takeover" onclick="handleSessionStart('${tuner.roku_ip}', true)">Takeover</button>` : ''}
                 </div>
             `).join('');
         }
@@ -231,11 +278,11 @@
 
         async function startSession(tunerIp, isTakeover) {
             if (activeTunerIp && activeTunerIp !== tunerIp) {
-                await stopSession(); // Stop previous session if switching
+                await stopSession();
             }
             
             if(isTakeover) {
-                await stopSession(tunerIp, true); // Stop the specific tuner without clearing UI
+                await stopSession(tunerIp, true);
             }
 
             cleanupPlayer();
@@ -247,6 +294,7 @@
                 const data = await response.json();
                 if (response.ok) {
                     activeTunerIp = data.roku_ip;
+                    recordingOptions.style.display = 'block';
                     const streamUrl = `${window.location.origin}/api/pretune/stream?tuner_ip=${data.roku_ip}`;
                     if (mpegts.isSupported()) {
                         player = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: streamUrl });
@@ -276,12 +324,59 @@
             } catch (error) { console.error(`Failed to send key ${key}:`, error); }
         }
         
-        async function sendToChannels() {
+        async function fetchRokuInfo() {
+             if (!activeTunerIp) { showNotification('Please start a session first.', 'error'); return; }
+             try {
+                const response = await fetch(window.location.origin + '/api/pretune/fetch_info', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ tuner_ip: activeTunerIp })
+                });
+                const data = await response.json();
+                if (data.status === 'success' && data.metadata) {
+                    if(data.metadata.title) document.getElementById('title-input').value = data.metadata.title;
+                    if(data.metadata.subtitle) document.getElementById('subtitle-input').value = data.metadata.subtitle;
+                    if(data.metadata.duration) document.getElementById('duration-input').value = data.metadata.duration;
+                    showNotification('Metadata fetched successfully!', 'success');
+                } else if (data.status === 'nodata') {
+                    showNotification('No metadata available from this app. Please enter manually.', 'warn');
+                } else {
+                    throw new Error(data.message || 'Failed to fetch info.');
+                }
+             } catch (error) {
+                showNotification(`Error fetching info: ${error.message}`, 'error');
+             }
+        }
+
+        async function startStream() {
             if (!activeTunerIp) { showNotification('Please start a session and select content first.', 'error'); return; }
+            
+            const shouldRecord = recordCheckbox.checked;
+            const duration = parseInt(document.getElementById('duration-input').value, 10);
+            
+            const metadata = {
+                title: document.getElementById('title-input').value,
+                subtitle: document.getElementById('subtitle-input').value,
+                description: document.getElementById('description-input').value,
+                image: document.getElementById('image-input').value
+            };
+
+            if (shouldRecord && (!duration || duration < 1)) {
+                showNotification('Please enter a valid recording duration.', 'error'); return;
+            }
+            if (shouldRecord && !metadata.title) {
+                 showNotification('A title is required for recording.', 'error'); return;
+            }
+
             try {
+                const payload = {
+                    tuner_ip: activeTunerIp,
+                    record: shouldRecord,
+                    duration: duration,
+                    metadata: metadata
+                };
                 const response = await fetch(window.location.origin + '/api/pretune/commit', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tuner_ip: activeTunerIp })
+                    body: JSON.stringify(payload)
                 });
                 const data = await response.json();
                 if (response.ok) {
@@ -289,6 +384,14 @@
                     cleanupPlayer();
                     activeTunerIp = null;
                     document.getElementById('app-launcher').value = '';
+                    recordingOptions.style.display = 'none';
+                    recordCheckbox.checked = false;
+                    metadataGroup.style.display = 'none';
+                    document.getElementById('title-input').value = '';
+                    document.getElementById('subtitle-input').value = '';
+                    document.getElementById('description-input').value = '';
+                    document.getElementById('image-input').value = '';
+
                 } else { throw new Error(data.error || 'Failed to send to Channels'); }
             } catch(error) { showNotification(error.message, 'error'); }
             fetchTunerStatus();
@@ -304,6 +407,7 @@
                  cleanupPlayer();
                  activeTunerIp = null;
                  document.getElementById('app-launcher').value = '';
+                 recordingOptions.style.display = 'none';
             }
             try {
                 await fetch(window.location.origin + '/api/pretune/stop', {
@@ -314,9 +418,13 @@
             } catch(error) {
                 if(!silent) showNotification('Failed to stop session.', 'error');
             }
-            fetchTunerStatus();
+            fetchTuner_status();
         }
         
+        recordCheckbox.addEventListener('change', function() {
+            metadataGroup.style.display = this.checked ? 'block' : 'none';
+        });
+
         window.addEventListener('beforeunload', () => {
             if (activeTunerIp) {
                 const payload = JSON.stringify({ tuner_ip: activeTunerIp });
@@ -330,4 +438,3 @@
     </script>
 </body>
 </html>
-
