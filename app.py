@@ -68,11 +68,9 @@ AUDIO_CHANNELS = get_audio_channels()
 TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS = [], [], [], [], {}
 TUNER_LOCK = threading.Lock()
 KEEP_ALIVE_TASKS = {}
-# --- Multi-session support for pre-tuning ---
-PREVIEW_SESSIONS = {} # Keyed by tuner IP
+PREVIEW_SESSIONS = {} 
 SESSION_LOCK = threading.Lock()
-# --- On-Demand Recording ---
-RECORDING_TASKS = {} # Keyed by tuner IP
+RECORDING_TASKS = {}
 
 roku_session = requests.Session()
 roku_session.timeout = 3
@@ -376,7 +374,7 @@ def generate_ondemand_m3u():
 
 
 @app.route('/')
-def index(): return f"Roku Channels Bridge is running. <a href='/status'>View Status</a> | <a href='/remote'>Go to Remote</a> | <a href='/preview'>Live TV Preview</a> | <a href='/pretune'>On-Demand Pre-Tune</a>"
+def index(): return f"Roku Channels Bridge is running. <a href='/status'>View Status</a>"
 
 @app.route('/remote')
 def remote_control(): return render_template('remote.html')
@@ -426,72 +424,196 @@ def api_config():
             return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "" })
         except Exception as e: return jsonify({"error": str(e)}), 500
 
-# --- All other routes remain the same ---
-# ... (omitting other routes for brevity as they are unchanged)
-# --- Metadata and Pre-Tune API ---
-
-@app.route('/api/metadata/search', methods=['POST'])
-def api_metadata_search():
-    if not TMDB_API_KEY:
-        return jsonify({"status": "error", "message": "TMDb API key is not configured."}), 400
-    
-    data = request.get_json()
-    query = data.get('query')
-    search_type = data.get('type', 'multi') # 'multi' searches both movies and tv
-    if not query:
-        return jsonify({"status": "error", "message": "Search query is required."}), 400
-
+@app.route('/upload_config', methods=['POST'])
+def upload_config():
+    if 'file' not in request.files: return "No file part", 400
+    file = request.files['file']
+    if file.filename == '' or not file.filename.endswith('.json'): return "Invalid file", 400
     try:
-        url = f"https://api.themoviedb.org/3/search/{search_type}?api_key={TMDB_API_KEY}&query={urllib.parse.quote(query)}"
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        results = response.json().get('results', [])
+        file.save(CONFIG_FILE_PATH)
+        load_config()
+        os.kill(os.getppid(), signal.SIGHUP)
+        return "Configuration updated successfully. Server is reloading...", 200
+    except Exception as e:
+        return f"Error processing config file: {e}", 400
+
+@app.route('/upload_plugin', methods=['POST'])
+def upload_plugin():
+    if 'file' not in request.files: return "No file part", 400
+    file = request.files['file']
+    if file.filename == '' or not file.filename.endswith('_plugin.py'): return "Invalid file", 400
+    try:
+        plugins_dir = os.path.join(os.path.dirname(__file__), 'plugins')
+        os.makedirs(plugins_dir, exist_ok=True)
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(plugins_dir, filename)
+        if not os.path.normpath(save_path).startswith(os.path.abspath(plugins_dir)):
+            return "Invalid filename", 400
+        file.save(save_path)
+        logging.info(f"New plugin uploaded: {filename}")
+        os.kill(os.getppid(), signal.SIGHUP)
+        return "Plugin uploaded successfully. Server is reloading...", 200
+    except Exception as e:
+        return f"Error saving plugin file: {e}", 500
         
-        # Format results for the frontend
-        formatted_results = []
-        for item in results[:10]: # Limit to 10 results
-            media_type = item.get('media_type', search_type if search_type != 'multi' else 'movie')
-            if media_type not in ['movie', 'tv']: continue
-
-            title = item.get('title') or item.get('name')
-            year = (item.get('release_date') or item.get('first_air_date') or 'N/A')[:4]
-            poster_path = item.get('poster_path')
-            
-            formatted_results.append({
-                "id": item.get('id'), "type": media_type, "title": title, "year": year,
-                "poster": f"https://image.tmdb.org/t/p/w92{poster_path}" if poster_path else None
-            })
-        return jsonify({"status": "success", "results": formatted_results})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/api/metadata/details', methods=['POST'])
-def api_metadata_details():
-    if not TMDB_API_KEY:
-        return jsonify({"status": "error", "message": "TMDb API key is not configured."}), 400
-    
-    data = request.get_json()
-    media_id = data.get('id')
-    media_type = data.get('type')
-    if not media_id or not media_type:
-        return jsonify({"status": "error", "message": "ID and type are required."}), 400
-
+@app.route('/remote/launch/<device_ip>/<app_id>', methods=['POST'])
+def remote_launch(device_ip, app_id):
     try:
-        url = f"https://api.themoviedb.org/3/{media_type}/{media_id}?api_key={TMDB_API_KEY}"
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        details = response.json()
-
-        poster_path = details.get('poster_path')
-        metadata = {
-            "description": details.get('overview'),
-            "image": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
-        }
-        return jsonify({"status": "success", "metadata": metadata})
-    except Exception as e:
+        roku_session.post(f"http://{device_ip}:8060/launch/{app_id}")
+        return jsonify({"status": "success"})
+    except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- The rest of the Pre-Tune API and other routes remain unchanged ---
-# ... (omitting other routes for brevity)
+@app.route('/remote/keypress/<device_ip>/<key>', methods=['POST'])
+def remote_keypress(device_ip, key):
+    with SESSION_LOCK:
+        is_in_preview = device_ip in PREVIEW_SESSIONS
+    if not any(t['roku_ip'] == device_ip for t in TUNERS) and not is_in_preview:
+        return jsonify({"status": "error", "message": "Device not found or not in a session."}), 404
+    try:
+        roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}")
+        return jsonify({"status": "success"})
+    except requests.exceptions.RequestException as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+        
+@app.route('/remote/reboot/<device_ip>', methods=['POST'])
+def remote_reboot(device_ip):
+    if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
+    reboot_sequence = ['Home', 'Home', 'Home', 'Up', 'Right', 'Up', 'Right', 'Up', 'Up', 'Right', 'Select']
+    executor.submit(send_key_sequence, device_ip, reboot_sequence)
+    return jsonify({"status": "success", "message": "Reboot sequence initiated."})
+
+@app.route('/remote/devices')
+def get_remote_devices():
+    return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
+
+@app.route('/api/plugins')
+def api_plugins():
+    plugin_list = [{"id": script_name, "name": plugin.app_name} for script_name, plugin in discovered_plugins.items()]
+    return jsonify(plugin_list)
+
+# --- Pre-Tune and Metadata API ---
+
+@app.route('/api/pretune/status')
+def api_pretune_status():
+    with SESSION_LOCK:
+        active_ips = set(PREVIEW_SESSIONS.keys())
+    status = []
+    for tuner in TUNERS:
+        tuner_status = "in-use" if tuner['in_use'] else "available"
+        if tuner['roku_ip'] in active_ips:
+            tuner_status = "pre-tuning"
+            if tuner['roku_ip'] in RECORDING_TASKS:
+                 tuner_status = "recording"
+        status.append({
+            "name": tuner.get("name", tuner['roku_ip']),
+            "roku_ip": tuner['roku_ip'],
+            "status": tuner_status
+        })
+    return jsonify(status)
+
+@app.route('/api/pretune/start', methods=['POST'])
+def api_pretune_start():
+    tuner_ip = request.json.get('tuner_ip')
+    if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
+    result = start_preview_session(tuner_ip)
+    return jsonify(result), 200 if result['status'] == 'success' else 503
+
+@app.route('/api/pretune/stop', methods=['POST'])
+def api_pretune_stop():
+    tuner_ip = request.json.get('tuner_ip')
+    if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
+    return jsonify(stop_preview_session(tuner_ip))
+
+@app.route('/api/pretune/commit', methods=['POST'])
+def api_pretune_commit():
+    data = request.get_json()
+    tuner_ip = data.get('tuner_ip')
+    record = data.get('record', False)
+    duration = data.get('duration', 0)
+    metadata = data.get('metadata', {})
+    if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
+    result = commit_preview_session(tuner_ip, record, duration, metadata)
+    return jsonify(result), 200 if result['status'] == 'success' else 409
+    
+@app.route('/api/pretune/fetch_info', methods=['POST'])
+def api_fetch_info():
+    tuner_ip = request.json.get('tuner_ip')
+    if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
+    try:
+        response = requests.get(f"http://{tuner_ip}:8060/query/media-player", timeout=3)
+        response.raise_for_status()
+        
+        root = ET.fromstring(response.content)
+        player_state = root.get('state')
+        if not player_state or player_state == 'close':
+            return jsonify({"status": "nodata"})
+
+        media_node = root.find('.//plugin') or root.find('.//media')
+        if media_node is None: return jsonify({"status": "nodata"})
+
+        metadata = {}
+        title = media_node.get('title')
+        duration_str = media_node.get('duration')
+        
+        if title: metadata['title'] = title
+        if duration_str:
+            try: metadata['duration'] = round(float(duration_str) / 60)
+            except ValueError: pass
+        
+        series_title = media_node.get('seriesTitle')
+        episode_title = media_node.get('episodeTitle')
+        if series_title and episode_title:
+             metadata['title'] = series_title
+             metadata['subtitle'] = episode_title
+
+        if not metadata: return jsonify({"status": "nodata"})
+        return jsonify({"status": "success", "metadata": metadata})
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch info from Roku {tuner_ip}: {e}")
+        return jsonify({"status": "error", "message": "Could not connect to Roku."}), 500
+    except ET.ParseError:
+        logging.error(f"Failed to parse XML from Roku {tuner_ip}")
+        return jsonify({"status": "nodata"})
+
+@app.route('/api/pretune/stream')
+def api_pretune_stream():
+    tuner_ip = request.args.get('tuner_ip')
+    with SESSION_LOCK:
+        if tuner_ip not in PREVIEW_SESSIONS:
+            return "No active preview session for this tuner.", 404
+        tuner = PREVIEW_SESSIONS[tuner_ip]['tuner']
+        encoder_url = tuner['encoder_url']
+    try:
+        req = requests.get(encoder_url, stream=True, timeout=10)
+        return Response(stream_with_context(req.iter_content(chunk_size=8192)), content_type=req.headers['content-type'])
+    except Exception as e:
+        logging.error(f"Error proxying pretune stream from {encoder_url}: {e}")
+        return "Failed to connect to encoder.", 500
+
+@app.route('/api/status')
+def api_status():
+    statuses = []
+    def check_tuner_status(tuner):
+        roku_ip, encoder_url = tuner['roku_ip'], tuner['encoder_url']
+        roku_status, encoder_status = 'offline', 'offline'
+        try:
+            roku_session.get(f"http://{roku_ip}:8060", timeout=3)
+            roku_status = 'online'
+        except requests.exceptions.RequestException: pass
+        try:
+            with requests.get(encoder_url, timeout=5, stream=True, allow_redirects=True) as response:
+                response.raise_for_status()
+                if next(response.iter_content(1), None): encoder_status = 'online'
+        except requests.exceptions.RequestException: pass
+        return { "name": tuner.get("name", roku_ip), "roku_ip": roku_ip, "encoder_url": encoder_url, "roku_status": roku_status, "encoder_status": encoder_status }
+
+    with ThreadPoolExecutor(max_workers=len(TUNERS) or 1) as status_executor:
+        statuses = list(status_executor.map(check_tuner_status, TUNERS))
+    
+    tuner_configs = [{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"], "encoder_url": t["encoder_url"]} for t in TUNERS]
+    return jsonify({"tuners": tuner_configs, "statuses": statuses})
+
 if __name__ != '__main__':
     load_config()
