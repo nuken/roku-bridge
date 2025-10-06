@@ -437,7 +437,17 @@
                 if (!response.ok) throw new Error(data.message || 'Failed to commit stream.');
                 
                 showNotification(data.message, 'success');
-                await stopSession(null, true);
+                // The backend now handles session cleanup on a timer for recordings.
+                // For non-recordings, we still need to clean up here.
+                if (!shouldRecord) {
+                    await stopSession(null, true);
+                } else {
+                    // For recordings, just reset the UI state without stopping the session
+                    cleanupPlayer();
+                    activeTunerIp = null;
+                    recordingOptions.style.display = 'none';
+                    fetchTunerStatus();
+                }
                 
             } catch (error) { showNotification(`Error: ${error.message}`, 'error'); }
         }
