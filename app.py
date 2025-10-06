@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.9.1-fix"
+APP_VERSION = "4.9.3-fix"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -259,7 +259,7 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
 
         try:
             airing_details = {
-                "Source": "M3U-OnDemand",
+                "Source": "manual",
                 "Channel": ondemand_channel_id,
                 "Title": metadata.get('title') or "On-Demand Recording",
                 "EpisodeTitle": metadata.get('subtitle'),
