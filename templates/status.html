@@ -145,12 +145,23 @@
         <div class="global-settings">
             <p>Set the generic logo and guide art for the "On-Demand Stream" channels in your guide.</p>
             <div class="form-group">
-                <label for="ondemand-settings-logo">Logo URL (4:3)</label>
+                <label for="ondemand-settings-logo">Logo URL</label>
                 <input type="text" id="ondemand-settings-logo" placeholder="https://...">
             </div>
             <div class="form-group">
-                <label for="ondemand-settings-art">Guide Art URL (4:3)</label>
+                <label for="ondemand-settings-art">Guide Art URL</label>
                 <input type="text" id="ondemand-settings-art" placeholder="https://...">
+            </div>
+        </div>
+        
+        <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;">
+            <h2><i class="fa-solid fa-cogs"></i> Integrations</h2>
+        </div>
+        <div class="global-settings">
+            <p>Configure third-party services like TMDb for metadata lookup.</p>
+            <div class="form-group">
+                <label for="tmdb-api-key">TMDb API Key (v3 Auth)</label>
+                <input type="text" id="tmdb-api-key" placeholder="Enter your TMDb API key">
             </div>
         </div>
 
@@ -202,7 +213,7 @@
     </div>
 
     <script>
-        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [], ondemand_settings: {} };
+        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [], ondemand_settings: {}, tmdb_api_key: '' };
         let availablePlugins = [];
         const epgOptionalFields = [ 'channel-number', 'tvg-logo', 'tvc-guide-art', 'tvc-guide-title', 'tvc-guide-description', 'tvc-guide-tags', 'tvc-guide-genres', 'tvc-guide-categories', 'tvc-guide-placeholders', 'tvc-stream-vcodec', 'tvc-stream-acodec', 'tune_delay' ];
 
@@ -237,6 +248,7 @@
                     document.getElementById('ondemand-settings-logo').value = appConfig.ondemand_settings.tvg_logo || '';
                     document.getElementById('ondemand-settings-art').value = appConfig.ondemand_settings.tvc_guide_art || '';
                 }
+                document.getElementById('tmdb-api-key').value = appConfig.tmdb_api_key || '';
             } catch (error) { console.error('Failed to load config:', error); showNotification('Error loading configuration.', 'error'); }
         }
 
@@ -246,6 +258,8 @@
                     tvg_logo: document.getElementById('ondemand-settings-logo').value,
                     tvc_guide_art: document.getElementById('ondemand-settings-art').value
                 };
+                appConfig.tmdb_api_key = document.getElementById('tmdb-api-key').value;
+
                 const response = await fetch(window.location.origin + '/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appConfig) });
                 const result = await response.json();
                 if (response.ok) { showNotification(result.message || 'Configuration saved!', 'success'); setTimeout(() => window.location.reload(), 2000); }
@@ -609,4 +623,3 @@
     </script>
 </body>
 </html>
-
