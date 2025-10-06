@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.8.7-fix"
+APP_VERSION = "4.8.8-fix"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -258,22 +258,25 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
             return
 
         try:
+            airing_details = {
+                "Source": "M3U-OnDemand",
+                "Channel": ondemand_channel_id,
+                "Title": metadata.get('title') or "On-Demand Recording",
+                "EpisodeTitle": metadata.get('subtitle'),
+                "Summary": metadata.get('description'),
+                "Image": metadata.get('image'),
+                "Genres": ["On-Demand"]
+            }
+            # Remove any keys with None values
+            airing_details = {k: v for k, v in airing_details.items() if v is not None}
+
             recording_payload = {
                 "Name": metadata.get('title') or "On-Demand Recording",
-                "Airing": {
-                    "Source": "M3U-OnDemand",
-                    "Channel": ondemand_channel_id,
-                    "Time": int(time.time()),
-                    "Duration": duration_minutes * 60,
-                    "Title": metadata.get('title') or "On-Demand Recording",
-                    "EpisodeTitle": metadata.get('subtitle'),
-                    "Summary": metadata.get('description'),
-                    "Image": metadata.get('image'),
-                    "Genres": ["On-Demand"]
-                }
+                "Time": int(time.time()),
+                "Duration": duration_minutes * 60,
+                "Channels": [ondemand_channel_id],
+                "Airing": airing_details
             }
-            # Remove any keys with None values from the Airing object
-            recording_payload["Airing"] = {k: v for k, v in recording_payload["Airing"].items() if v is not None}
 
             record_res = requests.post(f"http://{CHANNELS_DVR_IP}:8089/dvr/jobs/new", json=recording_payload, timeout=10)
             record_res.raise_for_status()
