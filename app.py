@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.8-tmdb"
+APP_VERSION = "4.8.1-fix"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -222,12 +222,12 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_ip_event):
+def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info):
     try:
         logging.info(f"Recording task started for {tuner_ip}, duration: {duration_minutes} mins.")
         
-        dvr_ip_event.wait(timeout=30)
-        dvr_ip = getattr(dvr_ip_event, 'dvr_ip', None)
+        dvr_info['event'].wait(timeout=30)
+        dvr_ip = dvr_info.get('ip')
         if not dvr_ip:
             logging.error(f"[Recording] DVR did not connect to the stream for {tuner_ip} within the timeout.")
             return
@@ -268,7 +268,11 @@ def start_preview_session(tuner_ip):
         tuner['in_use'] = True
     
     with SESSION_LOCK:
-        PREVIEW_SESSIONS[tuner_ip] = {'tuner': tuner, 'committed': False, 'dvr_ip_event': threading.Event()}
+        PREVIEW_SESSIONS[tuner_ip] = {
+            'tuner': tuner, 
+            'committed': False, 
+            'dvr_info': {'event': threading.Event(), 'ip': None}
+        }
         logging.info(f"Started preview session on tuner {tuner['name']}")
         return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip']}
 
@@ -286,7 +290,7 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
         
         if record and duration > 0:
             logging.info(f"Committing preview session for tuner {tuner_name} WITH recording for {duration} minutes.")
-            recording_thread = threading.Thread(target=handle_ondemand_recording, args=(tuner_ip, duration, metadata, session['dvr_ip_event']))
+            recording_thread = threading.Thread(target=handle_ondemand_recording, args=(tuner_ip, duration, metadata, session['dvr_info']))
             recording_thread.daemon = True
             recording_thread.start()
             RECORDING_TASKS[tuner_ip] = recording_thread
@@ -325,11 +329,10 @@ def stream_ondemand():
         session = PREVIEW_SESSIONS.get(tuner_ip)
         if not session or not session['committed']: return "No pre-tuned stream is ready.", 404
         tuner = session['tuner']
-        dvr_ip = request.remote_addr
-        session['dvr_ip_event'].dvr_ip = dvr_ip
-        session['dvr_ip_event'].set()
+        session['dvr_info']['ip'] = request.remote_addr
+        session['dvr_info']['event'].set()
 
-    logging.info(f"Channels DVR ({dvr_ip}) connected to committed stream from tuner {tuner['name']}")
+    logging.info(f"Channels DVR ({request.remote_addr}) connected to committed stream from tuner {tuner['name']}")
     
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
