@@ -52,6 +52,7 @@ root_logger.addHandler(deque_handler)
 
 # --- Environment & Global Variables ---
 CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
+RECORDINGS_DIR = '/app/recordings'
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
@@ -71,6 +72,7 @@ TUNER_LOCK = threading.Lock()
 KEEP_ALIVE_TASKS = {}
 PREVIEW_SESSIONS = {} 
 SESSION_LOCK = threading.Lock()
+RECORDING_PROCESSES = {}
 
 roku_session = requests.Session()
 roku_session.timeout = 3
@@ -227,83 +229,54 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-def create_dvr_job(tuner_ip, duration_minutes, metadata):
-    if not CHANNELS_DVR_IP:
-        logging.error("[Recording] Channels DVR IP is not configured. Cannot create job.")
+def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
+    tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
+    if not tuner:
+        logging.error(f"[Recording] Could not find tuner for IP: {tuner_ip}")
         return
 
-    tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
-    channel_guide_number = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
+    encoder_url = tuner['encoder_url']
+    duration_seconds = duration_minutes * 60
+    
+    title = metadata.get('title', 'On-Demand Recording')
+    year = metadata.get('year', '')
+    filename_base = f"{title} ({year})" if year else title
+    
+    filename_base = "".join([c for c in filename_base if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+    
+    # Create Movies or TV Shows subfolder if they don't exist
+    content_path = os.path.join(RECORDINGS_DIR, 'Movies' if content_type == 'movie' else 'TV Shows')
+    os.makedirs(content_path, exist_ok=True)
+    
+    output_path = os.path.join(content_path, f"{filename_base}.mkv")
+    
+    command = [
+        'ffmpeg', '-i', encoder_url, '-t', str(duration_seconds),
+        '-c', 'copy', '-map', '0', 
+        '-metadata', f"title={metadata.get('title', '')}",
+        '-metadata', f"comment={metadata.get('description', '')}",
+        '-f', 'matroska', '-loglevel', 'error', output_path
+    ]
 
     try:
-        dvr_channels_res = requests.get(f"http://{CHANNELS_DVR_IP}:8089/devices/ANY/channels", timeout=10)
-        dvr_channels_res.raise_for_status()
-        dvr_channels = dvr_channels_res.json()
+        if metadata.get('image'):
+            try:
+                img_res = requests.get(metadata['image'], timeout=10)
+                img_res.raise_for_status()
+                with open(os.path.join(content_path, f"{filename_base}-poster.jpg"), 'wb') as f:
+                    f.write(img_res.content)
+                logging.info("[Recording] Artwork downloaded successfully.")
+            except Exception as e:
+                logging.error(f"[Recording] Failed to download artwork: {e}")
 
-        ondemand_channel = next((ch for ch in dvr_channels if ch.get('GuideNumber') == channel_guide_number), None)
-
-        if not ondemand_channel:
-            logging.error(f"[Recording] Could not find channel with GuideNumber '{channel_guide_number}'. Please ensure M3U source is added and refreshed in DVR.")
-            if DEBUG_LOGGING_ENABLED:
-                logging.info("[Recording] Available channels from DVR:")
-                for ch in dvr_channels:
-                    logging.info(f"  - ID: {ch.get('ID')}, GuideNumber: {ch.get('GuideNumber')}, GuideName: {ch.get('GuideName')}, Source: {ch.get('Source')}")
-            return
-
-        ondemand_channel_id = ondemand_channel.get('ID')
-        source_id = ondemand_channel.get('Source')
-
-        if not ondemand_channel_id or not source_id:
-            logging.error(f"[Recording] Found channel for GuideNumber '{channel_guide_number}' but it is missing an internal 'ID' or 'Source'. Cannot proceed.")
-            return
-            
-        logging.info(f"[Recording] Found DVR channel ID '{ondemand_channel_id}' from source '{source_id}' for tuner '{tuner_name}'")
-
+        process = subprocess.Popen(command)
+        RECORDING_PROCESSES[tuner_ip] = process
+        logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
+        
+        threading.Timer(duration_seconds + 5, release_tuner, args=[tuner_ip]).start()
+        
     except Exception as e:
-        logging.error(f"[Recording] Failed to get channels from DVR at {CHANNELS_DVR_IP}: {e}")
-        return
-
-    try:
-        current_time = int(time.time())
-        duration_seconds = duration_minutes * 60
-
-        airing_details = {
-            "Source": source_id,
-            "Channel": ondemand_channel_id,
-            "Time": current_time,
-            "Duration": duration_seconds,
-            "Title": metadata.get('title') or "On-Demand Recording",
-            "EpisodeTitle": metadata.get('subtitle'),
-            "Summary": metadata.get('description'),
-            "Image": metadata.get('image'),
-            "Genres": ["On-Demand"]
-        }
-        airing_details = {k: v for k, v in airing_details.items() if v}
-
-        recording_payload = {
-            "Name": metadata.get('title') or "On-Demand Recording",
-            "Time": current_time,
-            "Duration": duration_seconds,
-            "Channels": [ondemand_channel_id],
-            "Airing": airing_details
-        }
-
-        if DEBUG_LOGGING_ENABLED:
-            logging.info(f"[Recording] Creating job with payload: {json.dumps(recording_payload, indent=2)}")
-
-        record_res = requests.post(
-            f"http://{CHANNELS_DVR_IP}:8089/dvr/jobs/new",
-            json=recording_payload,
-            timeout=10
-        )
-        record_res.raise_for_status()
-        logging.info(f"[Recording] Successfully created DVR job for tuner {tuner_ip}.")
-
-    except requests.exceptions.HTTPError as e:
-        logging.error(f"[Recording] HTTP Error from DVR: {e.response.status_code} {e.response.reason}")
-        logging.error(f"[Recording] DVR Response: {e.response.text}")
-    except Exception as e:
-        logging.error(f"[Recording] An unexpected error occurred while creating the DVR job: {e}")
+        logging.error(f"[Recording] Failed to start local recording: {e}")
 
 def start_preview_session(tuner_ip):
     with TUNER_LOCK:
@@ -323,7 +296,7 @@ def stop_preview_session(tuner_ip):
     release_tuner(tuner_ip)
     return {"status": "success", "message": "Session stopped."}
 
-def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
+def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, content_type='movie'):
     with SESSION_LOCK:
         if tuner_ip not in PREVIEW_SESSIONS:
             return {"status": "error", "message": "No active preview session."}
@@ -333,10 +306,10 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
         tuner_name = session['tuner']['name']
         
         if record and duration > 0:
-            logging.info(f"Committing tuner {tuner_name} for recording.")
-            create_dvr_job(tuner_ip, duration, metadata)
+            logging.info(f"Committing tuner {tuner_name} for local recording.")
+            start_local_recording(tuner_ip, duration, metadata, content_type)
             session['is_recording_queued'] = True
-            return {"status": "success", "message": "Recording job created. Tuner is waiting for DVR connection."}
+            return {"status": "success", "message": "Local recording started."}
         else:
             logging.info(f"Committed session for tuner {tuner_name} for live viewing.")
             return {"status": "success", "message": "Stream is now ready for Channels DVR."}
@@ -581,8 +554,9 @@ def api_pretune_commit():
     record = data.get('record', False)
     duration = data.get('duration', 0)
     metadata = data.get('metadata', {})
+    content_type = data.get('content_type', 'movie')
     if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
-    result = commit_preview_session(tuner_ip, record, duration, metadata)
+    result = commit_preview_session(tuner_ip, record, duration, metadata, content_type)
     return jsonify(result), 200 if result['status'] == 'success' else 409
     
 @app.route('/api/pretune/fetch_info', methods=['POST'])

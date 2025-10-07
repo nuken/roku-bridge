@@ -25,16 +25,17 @@
         .video-wrapper { position: relative; width: 100%; flex-grow: 1; background-color: #000; }
         video { width: 100%; height: 100%; object-fit: contain; }
         .controls-wrapper { background-color: var(--surface-color); padding: 15px; box-sizing: border-box; overflow-y: auto; }
+        .mode-selector { display: flex; gap: 10px; margin-bottom: 20px; }
+        .mode-btn { flex-grow: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background-color: var(--button-color); color: var(--text-color); font-size: 1em; cursor: pointer; }
+        .mode-btn.active { background-color: var(--primary-color); color: var(--bg-color); border-color: var(--primary-color); }
         .app-launcher select { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #555; background-color: var(--border-color); color: var(--text-color); font-size: 1em; margin-bottom: 15px; -webkit-appearance: none; appearance: none; }
         #start-stream, #stop-session { width: 100%; padding: 15px; border-radius: 12px; border: none; font-size: 1.2em; color: white; cursor: pointer; margin-top: 10px; }
         #start-stream { background-color: var(--success-color); }
         #stop-session { background-color: var(--error-color); }
-        .recording-options { background-color: var(--border-color); padding: 15px; border-radius: 12px; margin-top: 15px; display: none; }
-        .form-group-checkbox { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
-        .form-group-checkbox input[type="checkbox"] { width: 20px; height: 20px; }
+        .recording-options { background-color: var(--border-color); padding: 15px; border-radius: 12px; margin-top: 15px; }
         .form-group { margin-bottom: 10px; }
         .form-group label { display: block; margin-bottom: 5px; }
-        .form-group input, .form-group textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background-color: var(--bg-color); color: var(--text-color); font-size: 1em; box-sizing: border-box; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background-color: var(--bg-color); color: var(--text-color); font-size: 1em; box-sizing: border-box; }
         .fetch-buttons { display: flex; gap: 10px; margin-bottom: 15px; }
         .fetch-button { flex-grow: 1; padding: 10px; border-radius: 8px; border: none; font-size: 0.9em; color: white; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
         #fetch-roku-btn { background-color: #6f42c1; }
@@ -100,6 +101,12 @@
     <div class="pretune-container">
         <div class="controls-wrapper">
              <h1><i class="fa-solid fa-satellite-dish"></i> Pre-Tune Control</h1>
+
+             <div class="mode-selector">
+                <button id="watch-mode-btn" class="mode-btn active" onclick="setMode('watch')">Watch</button>
+                <button id="record-mode-btn" class="mode-btn" onclick="setMode('record')">Record</button>
+             </div>
+             
              <div id="tuner-list-container">
                 <h3>Select a Tuner</h3>
                 <div id="tuner-list"></div>
@@ -134,12 +141,15 @@
                     </div>
                 </div>
              </div>
-             <div class="recording-options" id="recording-options">
-                 <div class="form-group-checkbox">
-                    <input type="checkbox" id="record-checkbox">
-                    <label for="record-checkbox">Record on Channels DVR</label>
+             <div class="recording-options" id="recording-options" style="display: none;">
+                <div class="form-group">
+                    <label for="content-type-select">Content Type</label>
+                    <select id="content-type-select">
+                        <option value="movie">Movie</option>
+                        <option value="show">TV Show</option>
+                    </select>
                 </div>
-                <div id="metadata-group" style="display: none;">
+                <div id="metadata-group">
                     <div class="fetch-buttons">
                         <button class="fetch-button" id="fetch-roku-btn" onclick="fetchRokuInfo()"><i class="fa-brands fa-adn"></i> Fetch from Roku</button>
                         <button class="fetch-button" id="search-tmdb-btn" onclick="searchTmdb()"><i class="fa-solid fa-film"></i> Search Online</button>
@@ -206,10 +216,17 @@
         const videoElement = document.getElementById('video-player');
         const remoteOverlay = document.querySelector('.remote-overlay');
         const recordingOptions = document.getElementById('recording-options');
-        const recordCheckbox = document.getElementById('record-checkbox');
-        const metadataGroup = document.getElementById('metadata-group');
         let player, activeTunerIp = null;
-        
+        let currentMode = 'watch';
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('watch-mode-btn').classList.toggle('active', mode === 'watch');
+            document.getElementById('record-mode-btn').classList.toggle('active', mode === 'record');
+            recordingOptions.style.display = mode === 'record' ? 'block' : 'none';
+            document.getElementById('start-stream').textContent = mode === 'record' ? 'Start Local Recording' : 'Send to Channels DVR';
+        }
+
         function showNotification(message, type = 'success') {
             const n = document.createElement('div');
             n.className = `notification`;
@@ -284,7 +301,6 @@
                 const data = await response.json();
                 if (response.ok) {
                     activeTunerIp = data.roku_ip;
-                    recordingOptions.style.display = 'block';
                     const streamUrl = `/api/pretune/stream?tuner_ip=${data.roku_ip}`;
                     if (mpegts.isSupported()) {
                         player = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: streamUrl });
@@ -305,9 +321,6 @@
                  cleanupPlayer();
                  activeTunerIp = null;
                  document.getElementById('app-launcher').value = '';
-                 recordingOptions.style.display = 'none';
-                 recordCheckbox.checked = false;
-                 metadataGroup.style.display = 'none';
                  document.getElementById('title-input').value = '';
                  document.getElementById('subtitle-input').value = '';
                  document.getElementById('description-input').value = '';
@@ -416,7 +429,7 @@
         async function startStream() {
             if (!activeTunerIp) { showNotification('Please start a session first.', 'error'); return; }
             
-            const shouldRecord = recordCheckbox.checked;
+            const isRecording = currentMode === 'record';
             const duration = parseInt(document.getElementById('duration-input').value, 10);
             const metadata = {
                 title: document.getElementById('title-input').value,
@@ -424,38 +437,29 @@
                 description: document.getElementById('description-input').value,
                 image: document.getElementById('image-input').value
             };
+            const contentType = document.getElementById('content-type-select').value;
 
-            if (shouldRecord && (!duration || duration < 1)) { showNotification('A valid duration is required.', 'error'); return; }
-            if (shouldRecord && !metadata.title) { showNotification('A title is required for recording.', 'error'); return; }
+            if (isRecording && (!duration || duration < 1)) { showNotification('A valid duration is required for recording.', 'error'); return; }
+            if (isRecording && !metadata.title) { showNotification('A title is required for recording.', 'error'); return; }
 
             try {
                 const response = await fetch('/api/pretune/commit', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tuner_ip: activeTunerIp, record: shouldRecord, duration: duration, metadata: metadata })
+                    body: JSON.stringify({ tuner_ip: activeTunerIp, record: isRecording, duration: duration, metadata: metadata, content_type: contentType })
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || 'Failed to commit stream.');
                 
                 showNotification(data.message, 'success');
-                // The backend now handles session cleanup on a timer for recordings.
-                // For non-recordings, we still need to clean up here.
-                if (!shouldRecord) {
-                    await stopSession(null, true);
-                } else {
-                    // For recordings, just reset the UI state without stopping the session
-                    cleanupPlayer();
-                    activeTunerIp = null;
-                    recordingOptions.style.display = 'none';
-                    fetchTunerStatus();
-                }
+                
+                // For local recordings or live viewing, reset the UI after committing
+                cleanupPlayer();
+                activeTunerIp = null;
+                fetchTunerStatus();
                 
             } catch (error) { showNotification(`Error: ${error.message}`, 'error'); }
         }
         
-        recordCheckbox.addEventListener('change', function() {
-            metadataGroup.style.display = this.checked ? 'block' : 'none';
-        });
-
         window.addEventListener('beforeunload', () => {
             if (activeTunerIp) {
                 const payload = JSON.stringify({ tuner_ip: activeTunerIp });
@@ -468,6 +472,7 @@
         
         document.addEventListener('DOMContentLoaded', () => {
             fetchTunerStatus();
+            setMode('watch'); // Set initial mode
             setInterval(fetchTunerStatus, 15000);
         });
     </script>
