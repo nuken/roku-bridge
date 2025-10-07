@@ -83,6 +83,7 @@
         
         function stopPreview() {
             cleanupPlayer();
+            fetch('/api/preview/stop', { method: 'POST' });
         }
         
         window.addEventListener('beforeunload', cleanupPlayer);

@@ -433,6 +433,17 @@ def upload_plugin():
         return f"Error saving plugin file: {e}", 500
 
 # --- NEW Pre-Tune API ---
+@app.route('/api/preview/stop', methods=['POST'])
+def api_preview_stop():
+    with TUNER_LOCK:
+        for tuner in TUNERS:
+            with SESSION_LOCK:
+                is_in_preview_session = tuner['roku_ip'] in PREVIEW_SESSIONS
+            if tuner['in_use'] and not is_in_preview_session:
+                release_tuner(tuner['roku_ip'])
+                return jsonify({"status": "success", "message": f"Released tuner {tuner.get('name')}"})
+    return jsonify({"status": "error", "message": "No active preview stream tuner found to release."})
+
 @app.route('/api/pretune/status')
 def api_pretune_status():
     with SESSION_LOCK:
@@ -549,4 +560,3 @@ def api_plugins():
 
 if __name__ != '__main__':
     load_config()
-
