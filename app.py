@@ -237,18 +237,29 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
 
     encoder_url = tuner['encoder_url']
     duration_seconds = duration_minutes * 60
-    
+
     title = metadata.get('title', 'On-Demand Recording')
     year = metadata.get('year', '')
-    filename_base = f"{title} ({year})" if year else title
     
-    filename_base = "".join([c for c in filename_base if c.isalpha() or c.isdigit() or c==' ']).rstrip()
-    
-    content_path = os.path.join(RECORDINGS_DIR, 'Movies' if content_type == 'movie' else 'TV Shows')
-    os.makedirs(content_path, exist_ok=True)
-    
-    output_path = os.path.join(content_path, f"{filename_base}.mkv")
-    
+    # Sanitize the base title
+    sanitized_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+
+    if content_type == 'movie':
+        filename_base = f"{sanitized_title} ({year})" if year else sanitized_title
+        content_path = os.path.join(RECORDINGS_DIR, 'Movies')
+        os.makedirs(content_path, exist_ok=True)
+        output_path = os.path.join(content_path, f"{filename_base}.mkv")
+    else: # TV Show
+        season = metadata.get('season', 1)
+        episode = metadata.get('episode', 1)
+        episode_title = metadata.get('subtitle', f"Episode {episode}")
+        sanitized_episode_title = "".join([c for c in episode_title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+        
+        filename_base = f"{sanitized_title} - s{str(season).zfill(2)}e{str(episode).zfill(2)} - {sanitized_episode_title}"
+        content_path = os.path.join(RECORDINGS_DIR, 'TV Shows', sanitized_title, f"Season {str(season).zfill(2)}")
+        os.makedirs(content_path, exist_ok=True)
+        output_path = os.path.join(content_path, f"{filename_base}.mkv")
+
     command = [
         'ffmpeg', '-i', encoder_url, '-t', str(duration_seconds),
         '-c', 'copy', '-map', '0', 
@@ -272,7 +283,6 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         RECORDING_PROCESSES[tuner_ip] = process
         logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
         
-        # This is where we set the end time for the countdown
         with SESSION_LOCK:
             if tuner_ip in PREVIEW_SESSIONS:
                 PREVIEW_SESSIONS[tuner_ip]['recording_end_time'] = time.time() + duration_seconds

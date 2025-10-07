@@ -89,6 +89,7 @@
         .modal-button { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; }
         .modal-button.cancel { background-color: #6c757d; color: white; }
         .modal-button.confirm { background-color: var(--warn-color); color: #111; }
+        .tv-show-fields { display: none; }
 
         @media (min-width: 769px) {
             .pretune-container { flex-direction: row; }
@@ -160,6 +161,20 @@
                         <label for="title-input">Title</label>
                         <input type="text" id="title-input" placeholder="Enter title to search online">
                     </div>
+                    <div class="tv-show-fields">
+                        <div class="form-group">
+                            <label for="season-input">Season Number</label>
+                            <input type="number" id="season-input" value="1" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="episode-input">Episode Number</label>
+                            <input type="number" id="episode-input" value="1" min="1">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="subtitle-input">Episode Title (for TV shows)</label>
+                        <input type="text" id="subtitle-input">
+                    </div>
                     <div class="form-group">
                         <label for="duration-input">Duration (minutes)</label>
                         <input type="number" id="duration-input" value="120" min="1">
@@ -167,10 +182,6 @@
                     <div class="form-group">
                         <label for="padding-input">Padding (minutes)</label>
                         <input type="number" id="padding-input" value="10" min="0">
-                    </div>
-                     <div class="form-group">
-                        <label for="subtitle-input">Subtitle / Episode (Optional)</label>
-                        <input type="text" id="subtitle-input">
                     </div>
                     <div class="form-group">
                         <label for="description-input">Description (Optional)</label>
@@ -324,7 +335,6 @@
             `;
             }).join('');
 
-            // Clean up old timers
             Object.keys(activeTimers).forEach(tunerIp => {
                 if (!currentRecordingTuners.has(tunerIp)) {
                     clearInterval(activeTimers[tunerIp]);
@@ -500,7 +510,9 @@
                 title: document.getElementById('title-input').value,
                 subtitle: document.getElementById('subtitle-input').value,
                 description: document.getElementById('description-input').value,
-                image: document.getElementById('image-input').value
+                image: document.getElementById('image-input').value,
+                season: document.getElementById('season-input').value,
+                episode: document.getElementById('episode-input').value,
             };
             const contentType = document.getElementById('content-type-select').value;
 
@@ -531,13 +543,18 @@
             }
         });
 
+        document.getElementById('content-type-select').addEventListener('change', function() {
+            document.querySelector('.tv-show-fields').style.display = this.value === 'show' ? 'block' : 'none';
+        });
+
         function openModal(id) { document.getElementById(id).style.display = 'flex'; }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
         
         document.addEventListener('DOMContentLoaded', () => {
             fetchTunerStatus();
-            setMode('watch'); // Set initial mode
-            setInterval(fetchTunerStatus, 5000); // Refresh more often for countdown
+            setMode('watch');
+            document.querySelector('.tv-show-fields').style.display = 'none';
+            setInterval(fetchTunerStatus, 5000);
         });
     </script>
 </body>
