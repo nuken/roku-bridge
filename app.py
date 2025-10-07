@@ -254,7 +254,6 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         
         airing_details = {
             "Source": "manual",
-            "Channel": ondemand_channel_id,
             "Time": current_time,
             "Duration": duration_seconds,
             "Title": metadata.get('title') or "On-Demand Recording",
