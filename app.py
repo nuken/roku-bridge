@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "5.0.2"
+APP_VERSION = "5.0.3"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -249,7 +249,6 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         return
 
     ondemand_channel_id = ondemand_channel_info.get('ID')
-    ondemand_channel_number = ondemand_channel_info.get('Number')
 
     try:
         current_time = int(time.time())
@@ -257,7 +256,7 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         
         airing_details = {
             "Source": "manual",
-            "Channel": ondemand_channel_number,
+            "Channel": ondemand_channel_id,
             "Time": current_time,
             "Duration": duration_seconds,
             "Title": metadata.get('title') or "On-Demand Recording",
