@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "5.0.1"
+APP_VERSION = "5.0.2"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -242,27 +242,38 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         logging.error(f"[Recording] Failed to get channels from DVR at {CHANNELS_DVR_IP}: {e}")
         return
         
-    ondemand_channel_id = next((ch.get('ID') for ch in dvr_channels if ch.get('GuideName') == f"On-Demand Stream ({tuner_name})"), None)
+    ondemand_channel_info = next((ch for ch in dvr_channels if ch.get('GuideName') == f"On-Demand Stream ({tuner_name})"), None)
     
-    if not ondemand_channel_id:
+    if not ondemand_channel_info:
         logging.error(f"[Recording] Could not find on-demand channel for tuner {tuner_name} in Channels DVR.")
         return
+
+    ondemand_channel_id = ondemand_channel_info.get('ID')
+    ondemand_channel_number = ondemand_channel_info.get('Number')
 
     try:
         current_time = int(time.time())
         duration_seconds = duration_minutes * 60
         
         airing_details = {
-            "Source": "manual", "Channel": ondemand_channel_id, "Time": current_time,
-            "Duration": duration_seconds, "Title": metadata.get('title') or "On-Demand Recording",
-            "EpisodeTitle": metadata.get('subtitle'), "Summary": metadata.get('description'),
-            "Image": metadata.get('image'), "Genres": ["On-Demand"]
+            "Source": "manual",
+            "Channel": ondemand_channel_number,
+            "Time": current_time,
+            "Duration": duration_seconds,
+            "Title": metadata.get('title') or "On-Demand Recording",
+            "EpisodeTitle": metadata.get('subtitle'),
+            "Summary": metadata.get('description'),
+            "Image": metadata.get('image'),
+            "Genres": ["On-Demand"]
         }
         airing_details = {k: v for k, v in airing_details.items() if v}
 
         recording_payload = {
-            "Name": metadata.get('title') or "On-Demand Recording", "Time": current_time,
-            "Duration": duration_seconds, "Channels": [ondemand_channel_id], "Airing": airing_details
+            "Name": metadata.get('title') or "On-Demand Recording",
+            "Time": current_time,
+            "Duration": duration_seconds,
+            "Channels": [ondemand_channel_id],
+            "Airing": airing_details
         }
 
         record_res = requests.post(f"http://{CHANNELS_DVR_IP}:8089/dvr/jobs/new", json=recording_payload, timeout=10)
@@ -301,9 +312,7 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
         
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for recording.")
-            # Create the DVR job immediately.
             create_dvr_job(tuner_ip, duration, metadata)
-            # Mark the session for recording, but do not lock the tuner yet.
             session['is_recording_queued'] = True
             return {"status": "success", "message": "Recording job created. Tuner is waiting for DVR connection."}
         else:
@@ -341,11 +350,9 @@ def stream_ondemand():
         if not session or not session.get('committed'):
             return "No committed stream is ready for this tuner.", 404
 
-    # Lock the tuner only when the DVR connects to the stream.
     with TUNER_LOCK:
         tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
         if not tuner or tuner.get('in_use'):
-            # This can happen if two requests for the same stream come in at once.
             return "Tuner is busy with another stream.", 503
         tuner['in_use'] = True
         logging.info(f"Channels DVR ({request.remote_addr}) connected to stream from tuner {tuner['name']}. Locking tuner.")
