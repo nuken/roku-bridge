@@ -231,6 +231,9 @@ def handle_ondemand_recording(tuner_ip, duration_minutes, metadata, dvr_info_eve
         
         dvr_info_event.wait(timeout=30)
         
+        # Add a small delay to give Channels DVR time to fully connect
+        time.sleep(5)
+        
         if not CHANNELS_DVR_IP:
             logging.error("[Recording] Channels DVR IP is not configured. Cannot send record command.")
             return
