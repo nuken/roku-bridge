@@ -59,7 +59,6 @@ ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00' + b'\xff' * 175
 TMDB_API_KEY = ''
-CHANNELS_DVR_IP = ''
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
@@ -81,13 +80,13 @@ executor = ThreadPoolExecutor(max_workers=10)
 # --- Core Application Logic ---
 
 def load_config():
-    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY, CHANNELS_DVR_IP
+    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY
     if not os.path.exists(CONFIG_FILE_PATH):
         logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating default.")
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": ""}, f, indent=2)
+                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""}, f, indent=2)
         except Exception as e:
             logging.error(f"Could not create default config: {e}")
     try:
@@ -100,11 +99,9 @@ def load_config():
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
         ONDEMAND_SETTINGS = config_data.get('ondemand_settings', {})
         TMDB_API_KEY = config_data.get('tmdb_api_key', '')
-        CHANNELS_DVR_IP = config_data.get('channels_dvr_ip', '')
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
         if TMDB_API_KEY: logging.info("TMDb API Key is configured.")
-        if CHANNELS_DVR_IP: logging.info(f"Channels DVR IP is configured: {CHANNELS_DVR_IP}")
 
     except Exception as e:
         logging.error(f"Error loading config: {e}")
@@ -244,7 +241,6 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     
     filename_base = "".join([c for c in filename_base if c.isalpha() or c.isdigit() or c==' ']).rstrip()
     
-    # Create Movies or TV Shows subfolder if they don't exist
     content_path = os.path.join(RECORDINGS_DIR, 'Movies' if content_type == 'movie' else 'TV Shows')
     os.makedirs(content_path, exist_ok=True)
     
@@ -311,6 +307,7 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, co
             session['is_recording_queued'] = True
             return {"status": "success", "message": "Local recording started."}
         else:
+            # This path is for the "Watch on TV" button, which we are keeping for live viewing
             logging.info(f"Committed session for tuner {tuner_name} for live viewing.")
             return {"status": "success", "message": "Stream is now ready for Channels DVR."}
 
@@ -355,42 +352,6 @@ def stream_ondemand():
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
-
-def generate_m3u_from_channels(channel_list, playlist_filter=None):
-    m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
-    filtered_list = [ch for ch in channel_list if not playlist_filter or ch.get('playlist') == playlist_filter]
-    for channel in filtered_list:
-        stream_url = f"http://{request.host}/stream/{channel['id']}"
-        extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
-        tags = {"tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo", "tvc-guide-stationid": "tvc_guide_stationid"}
-        for tag, key in tags.items():
-            if key in channel: extinf_line += f' {tag}="{channel[key]}"'
-        if 'playlist' in channel and channel['playlist']: extinf_line += f' group-title="{channel["playlist"]}"'
-        extinf_line += f',{channel["name"]}'
-        m3u_content.extend([extinf_line, stream_url])
-    return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
-
-@app.route('/channels.m3u')
-def generate_gracenote_m3u(): return generate_m3u_from_channels(CHANNELS, request.args.get('playlist'))
-
-@app.route('/epg_channels.m3u')
-def generate_epg_m3u(): return generate_m3u_from_channels(EPG_CHANNELS, request.args.get('playlist'))
-
-@app.route('/ondemand.m3u')
-def generate_ondemand_m3u():
-    m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
-    for idx, tuner in enumerate(TUNERS, start=20000):
-        tuner_name = tuner.get("name", tuner['roku_ip'])
-        channel_id = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
-        stream_url = f"http://{request.host}/stream/ondemand_stream?tuner_ip={tuner['roku_ip']}"
-        channel_name = f"On-Demand Stream ({tuner_name})"
-        extinf_line = f'#EXTINF:-1 channel-id="{channel_id}" channel-number="{idx}" tvg-name="{channel_name}"'
-        if ONDEMAND_SETTINGS.get('tvg_logo'): extinf_line += f' tvg-logo="{ONDEMAND_SETTINGS["tvg_logo"]}"'
-        if ONDEMAND_SETTINGS.get('tvc_guide_art'): extinf_line += f' tvc-guide-art="{ONDEMAND_SETTINGS["tvc_guide_art"]}"'
-        extinf_line += f',{channel_name}'
-        m3u_content.extend([extinf_line, stream_url])
-    return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
-
 
 @app.route('/')
 def index(): return f"Roku Channels Bridge is running. <a href='/status'>View Status</a>"
@@ -440,7 +401,7 @@ def api_config():
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
             return jsonify(config_data)
         except FileNotFoundError:
-            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": "" })
+            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""})
         except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])
@@ -693,7 +654,8 @@ def api_metadata_details():
         poster_path = details.get('poster_path')
         metadata = {
             "description": details.get('overview'),
-            "image": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
+            "image": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None,
+            "runtime": details.get('runtime')
         }
         return jsonify({"status": "success", "metadata": metadata})
     except Exception as e:

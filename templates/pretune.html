@@ -162,6 +162,10 @@
                         <label for="duration-input">Duration (minutes)</label>
                         <input type="number" id="duration-input" value="120" min="1">
                     </div>
+                    <div class="form-group">
+                        <label for="padding-input">Padding (minutes)</label>
+                        <input type="number" id="padding-input" value="10" min="0">
+                    </div>
                      <div class="form-group">
                         <label for="subtitle-input">Subtitle / Episode (Optional)</label>
                         <input type="text" id="subtitle-input">
@@ -420,6 +424,9 @@
                 if (data.metadata) {
                     document.getElementById('description-input').value = data.metadata.description || '';
                     document.getElementById('image-input').value = data.metadata.image || '';
+                    if (data.metadata.runtime) {
+                        document.getElementById('duration-input').value = data.metadata.runtime;
+                    }
                     showNotification('Details populated!', 'success');
                 }
                 closeModal('tmdb-results-modal');
@@ -431,6 +438,9 @@
             
             const isRecording = currentMode === 'record';
             const duration = parseInt(document.getElementById('duration-input').value, 10);
+            const padding = parseInt(document.getElementById('padding-input').value, 10);
+            const totalDuration = duration + padding;
+
             const metadata = {
                 title: document.getElementById('title-input').value,
                 subtitle: document.getElementById('subtitle-input').value,
@@ -439,20 +449,19 @@
             };
             const contentType = document.getElementById('content-type-select').value;
 
-            if (isRecording && (!duration || duration < 1)) { showNotification('A valid duration is required for recording.', 'error'); return; }
+            if (isRecording && (!totalDuration || totalDuration < 1)) { showNotification('A valid duration is required for recording.', 'error'); return; }
             if (isRecording && !metadata.title) { showNotification('A title is required for recording.', 'error'); return; }
 
             try {
                 const response = await fetch('/api/pretune/commit', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tuner_ip: activeTunerIp, record: isRecording, duration: duration, metadata: metadata, content_type: contentType })
+                    body: JSON.stringify({ tuner_ip: activeTunerIp, record: isRecording, duration: totalDuration, metadata: metadata, content_type: contentType })
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || 'Failed to commit stream.');
                 
                 showNotification(data.message, 'success');
                 
-                // For local recordings or live viewing, reset the UI after committing
                 cleanupPlayer();
                 activeTunerIp = null;
                 fetchTunerStatus();
