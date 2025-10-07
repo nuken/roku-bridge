@@ -228,31 +228,44 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
         release_tuner(roku_ip_to_release)
 
 def create_dvr_job(tuner_ip, duration_minutes, metadata):
-    """
-    Alternative approach: Instead of creating a DVR job based on a channel, 
-    this tells the DVR to start recording from the stream URL directly.
-    """
     if not CHANNELS_DVR_IP:
         logging.error("[Recording] Channels DVR IP is not configured. Cannot create job.")
         return
 
     tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
-    
-    # Build the stream URL that DVR will connect to
     stream_url = f"http://{request.host}/stream/ondemand_stream?tuner_ip={tuner_ip}"
     
+    placeholder_channel_id = None
+    try:
+        dvr_channels_res = requests.get(f"http://{CHANNELS_DVR_IP}:8089/devices/ANY/channels", timeout=10)
+        dvr_channels_res.raise_for_status()
+        dvr_channels = dvr_channels_res.json()
+        for ch in dvr_channels:
+            if ch.get('ID') and ch.get('Source'):
+                placeholder_channel_id = ch.get('ID')
+                logging.info(f"[Recording] Using placeholder channel ID '{placeholder_channel_id}' to satisfy API.")
+                break
+        if not placeholder_channel_id:
+            logging.error("[Recording] Could not find any valid channel on the DVR to use as a placeholder.")
+            return
+            
+    except Exception as e:
+        logging.error(f"[Recording] Failed to get channels from DVR to find a placeholder: {e}")
+        return
+
     try:
         current_time = int(time.time())
         duration_seconds = duration_minutes * 60
         
-        # This uses Channels DVR's ability to record from any URL
         recording_payload = {
             "Name": metadata.get('title') or "On-Demand Recording",
             "Time": current_time,
             "Duration": duration_seconds,
             "StreamURL": stream_url,
+            "Channels": [placeholder_channel_id],
             "Airing": {
-                "Source": "manual",
+                "Source": "manual", 
+                "Channel": placeholder_channel_id,
                 "Time": current_time,
                 "Duration": duration_seconds,
                 "Title": metadata.get('title') or "On-Demand Recording",
@@ -263,11 +276,9 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
             }
         }
         
-        # Remove any None values from the Airing object
         recording_payload["Airing"] = {k: v for k, v in recording_payload["Airing"].items() if v}
 
         logging.info(f"[Recording] Creating stream recording for tuner {tuner_name}")
-        logging.info(f"[Recording] Stream URL: {stream_url}")
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"[Recording] Payload: {json.dumps(recording_payload, indent=2)}")
 
@@ -279,7 +290,6 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         record_res.raise_for_status()
         
         logging.info(f"[Recording] Successfully created DVR recording job")
-        logging.info(f"[Recording] DVR will connect to: {stream_url}")
 
     except requests.exceptions.HTTPError as e:
         logging.error(f"[Recording] HTTP Error from DVR: {e.response.status_code}")
