@@ -63,12 +63,14 @@
         .notification { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: 8px; z-index: 1001; color: white; opacity: 0; transition: opacity 0.5s, top 0.5s; }
         .notification.show { opacity: 1; top: 30px; }
         .tuner-list { list-style: none; padding: 0; margin: 0 0 20px 0; }
-        .tuner-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 8px; margin-bottom: 8px; background-color: var(--border-color); }
+        .tuner-item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 12px; border-radius: 8px; margin-bottom: 8px; background-color: var(--border-color); }
+        .tuner-info { display: flex; align-items: center; gap: 10px; }
         .tuner-item .status { font-weight: bold; padding: 4px 8px; border-radius: 5px; font-size: 0.9em; }
         .tuner-item .status.available { color: var(--available-color); }
         .tuner-item .status.in-use { color: var(--in-use-color); }
         .tuner-item .status.pre-tuning { color: var(--pre-tuning-color); }
         .tuner-item .status.recording { color: var(--recording-color); }
+        .tuner-item .countdown { font-size: 0.8em; color: #ccc; }
         .tuner-item button { padding: 8px 12px; border: none; border-radius: 6px; color: white; cursor: pointer; }
         .tuner-item button.start { background-color: var(--available-color); }
         .tuner-item button.takeover { background-color: var(--warn-color); }
@@ -180,7 +182,7 @@
                     </div>
                 </div>
              </div>
-             <button id="start-stream" onclick="startStream()">Send to Channels</button>
+             <button id="start-stream" onclick="startStream()">Send to TV (Live)</button>
              <button id="stop-session" onclick="stopSession()">Stop Session & Release Tuner</button>
         </div>
         <div class="video-wrapper">
@@ -222,13 +224,14 @@
         const recordingOptions = document.getElementById('recording-options');
         let player, activeTunerIp = null;
         let currentMode = 'watch';
+        const activeTimers = {};
 
         function setMode(mode) {
             currentMode = mode;
             document.getElementById('watch-mode-btn').classList.toggle('active', mode === 'watch');
             document.getElementById('record-mode-btn').classList.toggle('active', mode === 'record');
             recordingOptions.style.display = mode === 'record' ? 'block' : 'none';
-            document.getElementById('start-stream').textContent = mode === 'record' ? 'Start Local Recording' : 'Send to Channels DVR';
+            document.getElementById('start-stream').textContent = mode === 'record' ? 'Start Local Recording' : 'Send to TV (Live)';
         }
 
         function showNotification(message, type = 'success') {
@@ -251,6 +254,36 @@
             videoElement.src = "";
         }
 
+        function formatRemainingTime(seconds) {
+            if (seconds < 0) seconds = 0;
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${h.toString().padStart(1, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function startCountdown(tunerIp, endTime) {
+            const countdownId = `countdown-${tunerIp.replace(/\./g, '-')}`;
+            if (activeTimers[tunerIp]) {
+                clearInterval(activeTimers[tunerIp]);
+            }
+            const timer = setInterval(() => {
+                const countdownEl = document.getElementById(countdownId);
+                if (!countdownEl) {
+                    clearInterval(timer);
+                    return;
+                }
+                const remaining = endTime - (Date.now() / 1000);
+                if (remaining <= 0) {
+                    countdownEl.textContent = 'finishing up...';
+                    clearInterval(timer);
+                } else {
+                    countdownEl.textContent = `finishes in ${formatRemainingTime(remaining)}`;
+                }
+            }, 1000);
+            activeTimers[tunerIp] = timer;
+        }
+
         async function fetchTunerStatus() {
             try {
                 const response = await fetch(window.location.origin + '/api/pretune/status');
@@ -268,14 +301,36 @@
                 listEl.innerHTML = "<p>No tuners configured.</p>";
                 return;
             }
-            listEl.innerHTML = tuners.map(tuner => `
+            const currentRecordingTuners = new Set();
+            listEl.innerHTML = tuners.map(tuner => {
+                let countdownHtml = '';
+                if (tuner.status === 'recording' && tuner.recording_end_time) {
+                    const countdownId = `countdown-${tuner.roku_ip.replace(/\./g, '-')}`;
+                    countdownHtml = `<span class="countdown" id="${countdownId}"></span>`;
+                    currentRecordingTuners.add(tuner.roku_ip);
+                    startCountdown(tuner.roku_ip, tuner.recording_end_time);
+                }
+
+                return `
                 <div class="tuner-item">
-                    <span>${tuner.name}</span>
-                    <span class="status ${tuner.status}">${tuner.status.replace('-', ' ')}</span>
+                    <div class="tuner-info">
+                        <span>${tuner.name}</span>
+                        <span class="status ${tuner.status}">${tuner.status.replace('-', ' ')}</span>
+                        ${countdownHtml}
+                    </div>
                     ${tuner.status === 'available' ? `<button class="start" onclick="handleSessionStart('${tuner.roku_ip}', false)">Start</button>` : ''}
                     ${(tuner.status !== 'available' && tuner.status !== 'in-use') ? `<button class="takeover" onclick="handleSessionStart('${tuner.roku_ip}', true)">Takeover</button>` : ''}
                 </div>
-            `).join('');
+            `;
+            }).join('');
+
+            // Clean up old timers
+            Object.keys(activeTimers).forEach(tunerIp => {
+                if (!currentRecordingTuners.has(tunerIp)) {
+                    clearInterval(activeTimers[tunerIp]);
+                    delete activeTimers[tunerIp];
+                }
+            });
         }
 
         function handleSessionStart(tunerIp, isTakeover) {
@@ -482,7 +537,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             fetchTunerStatus();
             setMode('watch'); // Set initial mode
-            setInterval(fetchTunerStatus, 15000);
+            setInterval(fetchTunerStatus, 5000); // Refresh more often for countdown
         });
     </script>
 </body>
