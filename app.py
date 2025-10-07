@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.9.9-stable"
+APP_VERSION = "5.0.0"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -302,11 +302,6 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for recording.")
             session['recording_info'] = {'duration': duration, 'metadata': metadata}
-            
-            dvr_job_thread = threading.Thread(target=create_dvr_job, args=(tuner_ip, duration, metadata))
-            dvr_job_thread.daemon = True
-            dvr_job_thread.start()
-            
             return {"status": "success", "message": "Recording queued. Tuner is ready for DVR."}
         else:
             logging.info(f"Committed session for tuner {tuner_name} for live viewing.")
@@ -340,21 +335,24 @@ def stream_ondemand():
 
     with SESSION_LOCK:
         session = PREVIEW_SESSIONS.get(tuner_ip)
-        is_committed = session and session.get('committed')
+        if not session or not session.get('committed'):
+            return "No committed stream is ready for this tuner.", 404
 
-    if is_committed:
-        with TUNER_LOCK:
-            tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
-            if not tuner or tuner.get('in_use'):
-                return "Tuner is busy with another stream.", 503
-            tuner['in_use'] = True
-            logging.info(f"Channels DVR ({request.remote_addr}) connected to stream from tuner {tuner['name']}. Locking tuner.")
-        
-        tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
-        generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
-        return Response(stream_with_context(generator), mimetype='video/mpeg')
+    with TUNER_LOCK:
+        tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
+        if not tuner or tuner.get('in_use'):
+            return "Tuner is busy with another stream.", 503
+        tuner['in_use'] = True
+        logging.info(f"Channels DVR ({request.remote_addr}) connected to stream from tuner {tuner['name']}. Locking tuner.")
 
-    return "No committed stream is ready for this tuner.", 404
+    # If it's a recording, create the DVR job now that we have a connection
+    if 'recording_info' in session:
+        info = session['recording_info']
+        create_dvr_job(tuner_ip, info['duration'], info['metadata'])
+
+    tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
+    generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
+    return Response(stream_with_context(generator), mimetype='video/mpeg')
 
 def generate_m3u_from_channels(channel_list, playlist_filter=None):
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
@@ -520,11 +518,11 @@ def api_pretune_status():
         for tuner in TUNERS:
             tuner_status = "available"
             if tuner.get('in_use'):
-                tuner_status = "in-use" # Covers live TV and active on-demand streams
+                tuner_status = "in-use"
             elif tuner['roku_ip'] in active_preview_ips:
                  session = PREVIEW_SESSIONS[tuner['roku_ip']]
                  if session.get('recording_info'):
-                     tuner_status = "recording" # Awaiting DVR connection
+                     tuner_status = "recording"
                  else:
                      tuner_status = "pre-tuning"
             status.append({
