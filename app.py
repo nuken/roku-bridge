@@ -301,8 +301,11 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
         
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for recording.")
-            session['recording_info'] = {'duration': duration, 'metadata': metadata}
-            return {"status": "success", "message": "Recording queued. Tuner is ready for DVR."}
+            # Create the DVR job immediately.
+            create_dvr_job(tuner_ip, duration, metadata)
+            # Mark the session for recording, but do not lock the tuner yet.
+            session['is_recording_queued'] = True
+            return {"status": "success", "message": "Recording job created. Tuner is waiting for DVR connection."}
         else:
             logging.info(f"Committed session for tuner {tuner_name} for live viewing.")
             return {"status": "success", "message": "Stream is now ready for Channels DVR."}
@@ -338,18 +341,15 @@ def stream_ondemand():
         if not session or not session.get('committed'):
             return "No committed stream is ready for this tuner.", 404
 
+    # Lock the tuner only when the DVR connects to the stream.
     with TUNER_LOCK:
         tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
         if not tuner or tuner.get('in_use'):
+            # This can happen if two requests for the same stream come in at once.
             return "Tuner is busy with another stream.", 503
         tuner['in_use'] = True
         logging.info(f"Channels DVR ({request.remote_addr}) connected to stream from tuner {tuner['name']}. Locking tuner.")
-
-    # If it's a recording, create the DVR job now that we have a connection
-    if 'recording_info' in session:
-        info = session['recording_info']
-        create_dvr_job(tuner_ip, info['duration'], info['metadata'])
-
+    
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
@@ -521,7 +521,7 @@ def api_pretune_status():
                 tuner_status = "in-use"
             elif tuner['roku_ip'] in active_preview_ips:
                  session = PREVIEW_SESSIONS[tuner['roku_ip']]
-                 if session.get('recording_info'):
+                 if session.get('is_recording_queued'):
                      tuner_status = "recording"
                  else:
                      tuner_status = "pre-tuning"
