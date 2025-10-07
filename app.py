@@ -69,7 +69,7 @@ AUDIO_CHANNELS = get_audio_channels()
 TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS = [], [], [], [], {}
 TUNER_LOCK = threading.Lock()
 KEEP_ALIVE_TASKS = {}
-PREVIEW_SESSIONS = {}
+PREVIEW_SESSIONS = {} 
 SESSION_LOCK = threading.Lock()
 
 roku_session = requests.Session()
@@ -123,7 +123,7 @@ def release_tuner(tuner_ip):
         thread, stop_event = KEEP_ALIVE_TASKS.pop(tuner_ip)
         stop_event.set()
         thread.join(timeout=5)
-
+    
     with SESSION_LOCK:
         if tuner_ip in PREVIEW_SESSIONS:
             del PREVIEW_SESSIONS[tuner_ip]
@@ -233,36 +233,31 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         return
 
     tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
-    # This is the ID we expect to find in the DVR's GuideNumber field
     channel_guide_number = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
 
     try:
-        # Fetch all channels from the DVR
         dvr_channels_res = requests.get(f"http://{CHANNELS_DVR_IP}:8089/devices/ANY/channels", timeout=10)
         dvr_channels_res.raise_for_status()
         dvr_channels = dvr_channels_res.json()
 
-        ondemand_channel = None
-
-        # Method 1: Try to find by GuideNumber (this is what the M3U channel-id maps to)
-        logging.info(f"[Recording] Looking for channel with GuideNumber='{channel_guide_number}' in DVR")
         ondemand_channel = next((ch for ch in dvr_channels if ch.get('GuideNumber') == channel_guide_number), None)
 
-        # Method 2: Fallback to find by GuideName
         if not ondemand_channel:
-            channel_name = f"On-Demand Stream ({tuner_name})"
-            logging.info(f"[Recording] Could not find by GuideNumber, trying GuideName='{channel_name}'")
-            ondemand_channel = next((ch for ch in dvr_channels if ch.get('GuideName') == channel_name), None)
-
-        # Method 3: Log all available channels to help debug if still not found
-        if not ondemand_channel:
-            logging.error(f"[Recording] Could not find channel for tuner '{tuner_name}'. Please ensure the M3U source has been added and refreshed in Channels DVR. Available channels:")
-            for ch in dvr_channels:
-                logging.info(f"  - ID: {ch.get('ID')}, GuideNumber: {ch.get('GuideNumber')}, GuideName: {ch.get('GuideName')}")
+            logging.error(f"[Recording] Could not find channel with GuideNumber '{channel_guide_number}'. Please ensure M3U source is added and refreshed in DVR.")
+            if DEBUG_LOGGING_ENABLED:
+                logging.info("[Recording] Available channels from DVR:")
+                for ch in dvr_channels:
+                    logging.info(f"  - ID: {ch.get('ID')}, GuideNumber: {ch.get('GuideNumber')}, GuideName: {ch.get('GuideName')}, Source: {ch.get('Source')}")
             return
 
         ondemand_channel_id = ondemand_channel.get('ID')
-        logging.info(f"[Recording] Found DVR channel ID '{ondemand_channel_id}' for tuner '{tuner_name}'")
+        source_id = ondemand_channel.get('Source')
+
+        if not ondemand_channel_id or not source_id:
+            logging.error(f"[Recording] Found channel for GuideNumber '{channel_guide_number}' but it is missing an internal 'ID' or 'Source'. Cannot proceed.")
+            return
+            
+        logging.info(f"[Recording] Found DVR channel ID '{ondemand_channel_id}' from source '{source_id}' for tuner '{tuner_name}'")
 
     except Exception as e:
         logging.error(f"[Recording] Failed to get channels from DVR at {CHANNELS_DVR_IP}: {e}")
@@ -272,10 +267,9 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         current_time = int(time.time())
         duration_seconds = duration_minutes * 60
 
-        # Construct the 'Airing' object. The error log confirms 'Channel' is required here.
         airing_details = {
-            "Source": "manual",
-            "Channel": ondemand_channel_id,  # This is the critical field
+            "Source": source_id,
+            "Channel": ondemand_channel_id,
             "Time": current_time,
             "Duration": duration_seconds,
             "Title": metadata.get('title') or "On-Demand Recording",
@@ -286,24 +280,23 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         }
         airing_details = {k: v for k, v in airing_details.items() if v}
 
-        # Construct the final recording payload
         recording_payload = {
             "Name": metadata.get('title') or "On-Demand Recording",
             "Time": current_time,
             "Duration": duration_seconds,
-            "Channels": [ondemand_channel_id], # Top-level channel ID array
+            "Channels": [ondemand_channel_id],
             "Airing": airing_details
         }
 
-        logging.info(f"[Recording] Creating job with payload: {json.dumps(recording_payload, indent=2)}")
+        if DEBUG_LOGGING_ENABLED:
+            logging.info(f"[Recording] Creating job with payload: {json.dumps(recording_payload, indent=2)}")
 
         record_res = requests.post(f"http://{CHANNELS_DVR_IP}:8089/dvr/jobs/new", json=recording_payload, timeout=10)
         record_res.raise_for_status()
         logging.info(f"[Recording] Successfully created DVR job for tuner {tuner_ip}.")
 
     except requests.exceptions.HTTPError as e:
-        # Log the specific error from the DVR server if the request fails
-        logging.error(f"[Recording] Failed to send record command to DVR at {CHANNELS_DVR_IP}: {e}")
+        logging.error(f"[Recording] Failed to send record command to DVR at {CHANNELS_DVR_IP}: {e.response.status_code} {e.response.reason}")
         logging.error(f"[Recording] DVR Response: {e.response.text}")
     except Exception as e:
         logging.error(f"[Recording] An unexpected error occurred while creating the DVR job: {e}")
@@ -314,7 +307,7 @@ def start_preview_session(tuner_ip):
         if not tuner: return {"status": "error", "message": "Tuner not found."}
         if tuner.get('in_use'):
             return {"status": "error", "message": "Tuner is already in use for a live stream."}
-
+    
     with SESSION_LOCK:
         if tuner_ip in PREVIEW_SESSIONS:
             return {"status": "error", "message": "Tuner is already in a pre-tune session."}
@@ -330,11 +323,11 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None):
     with SESSION_LOCK:
         if tuner_ip not in PREVIEW_SESSIONS:
             return {"status": "error", "message": "No active preview session."}
-
+        
         session = PREVIEW_SESSIONS[tuner_ip]
         session['committed'] = True
         tuner_name = session['tuner']['name']
-
+        
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for recording.")
             create_dvr_job(tuner_ip, duration, metadata)
@@ -381,7 +374,7 @@ def stream_ondemand():
             return "Tuner is busy with another stream.", 503
         tuner['in_use'] = True
         logging.info(f"Channels DVR ({request.remote_addr}) connected to stream from tuner {tuner['name']}. Locking tuner.")
-
+    
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
@@ -409,12 +402,12 @@ def generate_epg_m3u(): return generate_m3u_from_channels(EPG_CHANNELS, request.
 @app.route('/ondemand.m3u')
 def generate_ondemand_m3u():
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
-    for tuner in TUNERS:
+    for idx, tuner in enumerate(TUNERS, start=20000):
         tuner_name = tuner.get("name", tuner['roku_ip'])
         channel_id = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
         stream_url = f"http://{request.host}/stream/ondemand_stream?tuner_ip={tuner['roku_ip']}"
         channel_name = f"On-Demand Stream ({tuner_name})"
-        extinf_line = f'#EXTINF:-1 channel-id="{channel_id}" tvg-name="{channel_name}"'
+        extinf_line = f'#EXTINF:-1 channel-id="{channel_id}" channel-number="{idx}" tvg-name="{channel_name}"'
         if ONDEMAND_SETTINGS.get('tvg_logo'): extinf_line += f' tvg-logo="{ONDEMAND_SETTINGS["tvg_logo"]}"'
         if ONDEMAND_SETTINGS.get('tvc_guide_art'): extinf_line += f' tvc-guide-art="{ONDEMAND_SETTINGS["tvc_guide_art"]}"'
         extinf_line += f',{channel_name}'
@@ -504,7 +497,7 @@ def upload_plugin():
         return "Plugin uploaded successfully. Server is reloading...", 200
     except Exception as e:
         return f"Error saving plugin file: {e}", 500
-
+        
 @app.route('/remote/launch/<device_ip>/<app_id>', methods=['POST'])
 def remote_launch(device_ip, app_id):
     try:
@@ -524,7 +517,7 @@ def remote_keypress(device_ip, key):
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
+        
 @app.route('/remote/reboot/<device_ip>', methods=['POST'])
 def remote_reboot(device_ip):
     if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
@@ -587,7 +580,7 @@ def api_pretune_commit():
     if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
     result = commit_preview_session(tuner_ip, record, duration, metadata)
     return jsonify(result), 200 if result['status'] == 'success' else 409
-
+    
 @app.route('/api/pretune/fetch_info', methods=['POST'])
 def api_fetch_info():
     tuner_ip = request.json.get('tuner_ip')
@@ -595,7 +588,7 @@ def api_fetch_info():
     try:
         response = requests.get(f"http://{tuner_ip}:8060/query/media-player", timeout=3)
         response.raise_for_status()
-
+        
         root = ET.fromstring(response.content)
         player_state = root.get('state')
         if not player_state or player_state == 'close':
@@ -607,12 +600,12 @@ def api_fetch_info():
         metadata = {}
         title = media_node.get('title')
         duration_str = media_node.get('duration')
-
+        
         if title: metadata['title'] = title
         if duration_str:
             try: metadata['duration'] = round(float(duration_str) / 60)
             except ValueError: pass
-
+        
         series_title = media_node.get('seriesTitle')
         episode_title = media_node.get('episodeTitle')
         if series_title and episode_title:
@@ -664,15 +657,15 @@ def api_status():
 
     with ThreadPoolExecutor(max_workers=len(TUNERS) or 1) as status_executor:
         statuses = list(status_executor.map(check_tuner_status, TUNERS))
-
+    
     tuner_configs = [{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"], "encoder_url": t["encoder_url"]} for t in TUNERS]
     return jsonify({"tuners": tuner_configs, "statuses": statuses})
-
+    
 @app.route('/api/metadata/search', methods=['POST'])
 def api_metadata_search():
     if not TMDB_API_KEY:
         return jsonify({"status": "error", "message": "TMDb API key is not configured."}), 400
-
+    
     data = request.get_json()
     query = data.get('query')
     search_type = data.get('type', 'multi')
@@ -684,7 +677,7 @@ def api_metadata_search():
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         results = response.json().get('results', [])
-
+        
         formatted_results = []
         for item in results[:10]:
             media_type = item.get('media_type', search_type if search_type != 'multi' else 'movie')
@@ -693,7 +686,7 @@ def api_metadata_search():
             title = item.get('title') or item.get('name')
             year = (item.get('release_date') or item.get('first_air_date') or 'N/A')[:4]
             poster_path = item.get('poster_path')
-
+            
             formatted_results.append({
                 "id": item.get('id'), "type": media_type, "title": title, "year": year,
                 "poster": f"https://image.tmdb.org/t/p/w92{poster_path}" if poster_path else None
@@ -706,7 +699,7 @@ def api_metadata_search():
 def api_metadata_details():
     if not TMDB_API_KEY:
         return jsonify({"status": "error", "message": "TMDb API key is not configured."}), 400
-
+    
     data = request.get_json()
     media_id = data.get('id')
     media_type = data.get('type')
