@@ -113,7 +113,7 @@ def release_tuner(tuner_ip):
         thread, stop_event = KEEP_ALIVE_TASKS.pop(tuner_ip)
         stop_event.set()
         thread.join(timeout=5)
-    
+
     with SESSION_LOCK:
         if tuner_ip in PREVIEW_SESSIONS:
             del PREVIEW_SESSIONS[tuner_ip]
@@ -226,7 +226,7 @@ def start_preview_session(tuner_ip):
         if tuner.get('in_use'):
             return {"status": "error", "message": "Tuner is already in use."}
         tuner['in_use'] = True
-    
+
     with SESSION_LOCK:
         PREVIEW_SESSIONS[tuner_ip] = {'tuner': tuner, 'committed': False}
         logging.info(f"Started preview session on tuner {tuner['name']}")
@@ -273,16 +273,16 @@ def stream_ondemand():
     tuner_ip = request.args.get('tuner_ip')
     if not tuner_ip:
         return "Tuner IP is required.", 400
-    
+
     with SESSION_LOCK:
         session = PREVIEW_SESSIONS.get(tuner_ip)
         if not session or not session['committed']:
             return "No pre-tuned stream is ready for this tuner.", 404
         tuner = session['tuner']
-    
+
     logging.info(f"Channels DVR connected to committed stream from tuner {tuner['name']}")
     time.sleep(2) # Give a moment for connection
-    
+
     tuner_mode = tuner.get('encoding_mode', ENCODING_MODE)
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
@@ -328,11 +328,11 @@ def generate_ondemand_m3u():
             extinf_line += f' tvg-logo="{ONDEMAND_SETTINGS["tvg_logo"]}"'
         if ONDEMAND_SETTINGS.get('tvc_guide_art'):
             extinf_line += f' tvc-guide-art="{ONDEMAND_SETTINGS["tvc_guide_art"]}"'
-        
+
         # --- THIS IS THE FIX ---
         extinf_line += f',{channel_name}'
         # --- END OF FIX ---
-        
+
         m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
@@ -517,7 +517,7 @@ def remote_keypress(device_ip, key):
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-        
+
 @app.route('/remote/reboot/<device_ip>', methods=['POST'])
 def remote_reboot(device_ip):
     if not any(t['roku_ip'] == device_ip for t in TUNERS): return jsonify({"status": "error", "message": "Device not found."}), 404
@@ -528,7 +528,7 @@ def remote_reboot(device_ip):
 @app.route('/remote/devices')
 def get_remote_devices():
     return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
-    
+
 @app.route('/api/status')
 def api_status():
     statuses = []
