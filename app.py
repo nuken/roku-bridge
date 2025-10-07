@@ -228,78 +228,64 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
         release_tuner(roku_ip_to_release)
 
 def create_dvr_job(tuner_ip, duration_minutes, metadata):
+    """
+    Alternative approach: Instead of creating a DVR job based on a channel, 
+    this tells the DVR to start recording from the stream URL directly.
+    """
     if not CHANNELS_DVR_IP:
         logging.error("[Recording] Channels DVR IP is not configured. Cannot create job.")
         return
 
     tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
-    channel_guide_number = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
-
-    try:
-        dvr_channels_res = requests.get(f"http://{CHANNELS_DVR_IP}:8089/devices/ANY/channels", timeout=10)
-        dvr_channels_res.raise_for_status()
-        dvr_channels = dvr_channels_res.json()
-
-        ondemand_channel = next((ch for ch in dvr_channels if ch.get('GuideNumber') == channel_guide_number), None)
-
-        if not ondemand_channel:
-            logging.error(f"[Recording] Could not find channel with GuideNumber '{channel_guide_number}'. Please ensure M3U source is added and refreshed in DVR.")
-            if DEBUG_LOGGING_ENABLED:
-                logging.info("[Recording] Available channels from DVR:")
-                for ch in dvr_channels:
-                    logging.info(f"  - ID: {ch.get('ID')}, GuideNumber: {ch.get('GuideNumber')}, GuideName: {ch.get('GuideName')}, Source: {ch.get('Source')}")
-            return
-
-        ondemand_channel_id = ondemand_channel.get('ID')
-        source_id = ondemand_channel.get('Source')
-
-        if not ondemand_channel_id or not source_id:
-            logging.error(f"[Recording] Found channel for GuideNumber '{channel_guide_number}' but it is missing an internal 'ID' or 'Source'. Cannot proceed.")
-            return
-            
-        logging.info(f"[Recording] Found DVR channel ID '{ondemand_channel_id}' from source '{source_id}' for tuner '{tuner_name}'")
-
-    except Exception as e:
-        logging.error(f"[Recording] Failed to get channels from DVR at {CHANNELS_DVR_IP}: {e}")
-        return
-
+    
+    # Build the stream URL that DVR will connect to
+    stream_url = f"http://{request.host}/stream/ondemand_stream?tuner_ip={tuner_ip}"
+    
     try:
         current_time = int(time.time())
         duration_seconds = duration_minutes * 60
-
-        airing_details = {
-            "Source": source_id,
-            "Channel": ondemand_channel_id,
-            "Time": current_time,
-            "Duration": duration_seconds,
-            "Title": metadata.get('title') or "On-Demand Recording",
-            "EpisodeTitle": metadata.get('subtitle'),
-            "Summary": metadata.get('description'),
-            "Image": metadata.get('image'),
-            "Genres": ["On-Demand"]
-        }
-        airing_details = {k: v for k, v in airing_details.items() if v}
-
+        
+        # This uses Channels DVR's ability to record from any URL
         recording_payload = {
             "Name": metadata.get('title') or "On-Demand Recording",
             "Time": current_time,
             "Duration": duration_seconds,
-            "Channels": [ondemand_channel_id],
-            "Airing": airing_details
+            "StreamURL": stream_url,
+            "Airing": {
+                "Source": "manual",
+                "Time": current_time,
+                "Duration": duration_seconds,
+                "Title": metadata.get('title') or "On-Demand Recording",
+                "EpisodeTitle": metadata.get('subtitle'),
+                "Summary": metadata.get('description'),
+                "Image": metadata.get('image'),
+                "Genres": ["On-Demand"]
+            }
         }
+        
+        # Remove any None values from the Airing object
+        recording_payload["Airing"] = {k: v for k, v in recording_payload["Airing"].items() if v}
 
+        logging.info(f"[Recording] Creating stream recording for tuner {tuner_name}")
+        logging.info(f"[Recording] Stream URL: {stream_url}")
         if DEBUG_LOGGING_ENABLED:
-            logging.info(f"[Recording] Creating job with payload: {json.dumps(recording_payload, indent=2)}")
+            logging.info(f"[Recording] Payload: {json.dumps(recording_payload, indent=2)}")
 
-        record_res = requests.post(f"http://{CHANNELS_DVR_IP}:8089/dvr/jobs/new", json=recording_payload, timeout=10)
+        record_res = requests.post(
+            f"http://{CHANNELS_DVR_IP}:8089/dvr/jobs/new",
+            json=recording_payload,
+            timeout=10
+        )
         record_res.raise_for_status()
-        logging.info(f"[Recording] Successfully created DVR job for tuner {tuner_ip}.")
+        
+        logging.info(f"[Recording] Successfully created DVR recording job")
+        logging.info(f"[Recording] DVR will connect to: {stream_url}")
 
     except requests.exceptions.HTTPError as e:
-        logging.error(f"[Recording] Failed to send record command to DVR at {CHANNELS_DVR_IP}: {e.response.status_code} {e.response.reason}")
-        logging.error(f"[Recording] DVR Response: {e.response.text}")
+        logging.error(f"[Recording] HTTP Error from DVR: {e.response.status_code}")
+        logging.error(f"[Recording] Response: {e.response.text}")
     except Exception as e:
-        logging.error(f"[Recording] An unexpected error occurred while creating the DVR job: {e}")
+        logging.error(f"[Recording] Unexpected error: {e}")
 
 def start_preview_session(tuner_ip):
     with TUNER_LOCK:
