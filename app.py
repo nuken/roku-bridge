@@ -241,7 +241,7 @@ def create_dvr_job(tuner_ip, duration_minutes, metadata):
         dvr_channels_res.raise_for_status()
         dvr_channels = dvr_channels_res.json()
         for ch in dvr_channels:
-            if ch.get('ID') and ch.get('Source'):
+            if ch.get('ID'):
                 placeholder_channel_id = ch.get('ID')
                 logging.info(f"[Recording] Using placeholder channel ID '{placeholder_channel_id}' to satisfy API.")
                 break
