@@ -25,12 +25,11 @@
         .video-wrapper { position: relative; width: 100%; flex-grow: 1; background-color: #000; }
         video { width: 100%; height: 100%; object-fit: contain; }
         .controls-wrapper { background-color: var(--surface-color); padding: 15px; box-sizing: border-box; overflow-y: auto; }
-        .mode-selector { display: flex; gap: 10px; margin-bottom: 20px; }
-        .mode-btn { flex-grow: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background-color: var(--button-color); color: var(--text-color); font-size: 1em; cursor: pointer; }
-        .mode-btn.active { background-color: var(--primary-color); color: var(--bg-color); border-color: var(--primary-color); }
         .app-launcher select { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #555; background-color: var(--border-color); color: var(--text-color); font-size: 1em; margin-bottom: 15px; -webkit-appearance: none; appearance: none; }
-        #start-stream, #stop-session { width: 100%; padding: 15px; border-radius: 12px; border: none; font-size: 1.2em; color: white; cursor: pointer; margin-top: 10px; }
-        #start-stream { background-color: var(--success-color); }
+        .action-buttons button { width: 100%; padding: 15px; border-radius: 12px; border: none; font-size: 1.2em; color: white; cursor: pointer; margin-top: 10px; }
+        #start-live-stream { background-color: #007bff; }
+        #start-local-recording { background-color: var(--success-color); }
+        #start-dvr-recording { background-color: #6f42c1; }
         #stop-session { background-color: var(--error-color); }
         .recording-options { background-color: var(--border-color); padding: 15px; border-radius: 12px; margin-top: 15px; }
         .form-group { margin-bottom: 10px; }
@@ -104,11 +103,6 @@
     <div class="pretune-container">
         <div class="controls-wrapper">
              <h1><i class="fa-solid fa-satellite-dish"></i> Pre-Tune Control</h1>
-
-             <div class="mode-selector">
-                <button id="watch-mode-btn" class="mode-btn active" onclick="setMode('watch')">Watch</button>
-                <button id="record-mode-btn" class="mode-btn" onclick="setMode('record')">Record</button>
-             </div>
              
              <div id="tuner-list-container">
                 <h3>Select a Tuner</h3>
@@ -144,7 +138,7 @@
                     </div>
                 </div>
              </div>
-             <div class="recording-options" id="recording-options" style="display: none;">
+             <div class="recording-options" id="recording-options">
                 <div class="form-group">
                     <label for="content-type-select">Content Type</label>
                     <select id="content-type-select">
@@ -193,8 +187,12 @@
                     </div>
                 </div>
              </div>
-             <button id="start-stream" onclick="startStream()">Send to TV (Live)</button>
-             <button id="stop-session" onclick="stopSession()">Stop Session & Release Tuner</button>
+             <div class="action-buttons">
+                <button id="start-live-stream" onclick="commitStream('live')">Send to TV (Live)</button>
+                <button id="start-local-recording" onclick="commitStream('local_record')">Start Local Recording</button>
+                <button id="start-dvr-recording" onclick="commitStream('dvr_record')">Record on Channels DVR</button>
+                <button id="stop-session" onclick="stopSession()">Stop Session & Release Tuner</button>
+             </div>
         </div>
         <div class="video-wrapper">
             <video id="video-player" autoplay muted playsinline></video>
@@ -234,16 +232,7 @@
         const remoteOverlay = document.querySelector('.remote-overlay');
         const recordingOptions = document.getElementById('recording-options');
         let player, activeTunerIp = null;
-        let currentMode = 'watch';
         const activeTimers = {};
-
-        function setMode(mode) {
-            currentMode = mode;
-            document.getElementById('watch-mode-btn').classList.toggle('active', mode === 'watch');
-            document.getElementById('record-mode-btn').classList.toggle('active', mode === 'record');
-            recordingOptions.style.display = mode === 'record' ? 'block' : 'none';
-            document.getElementById('start-stream').textContent = mode === 'record' ? 'Start Local Recording' : 'Send to TV (Live)';
-        }
 
         function showNotification(message, type = 'success') {
             const n = document.createElement('div');
@@ -498,10 +487,9 @@
             } catch (error) { showNotification(`Failed to get details: ${error.message}`, 'error'); }
         }
 
-        async function startStream() {
+        async function commitStream(commitMode) {
             if (!activeTunerIp) { showNotification('Please start a session first.', 'error'); return; }
             
-            const isRecording = currentMode === 'record';
             const duration = parseInt(document.getElementById('duration-input').value, 10);
             const padding = parseInt(document.getElementById('padding-input').value, 10);
             const totalDuration = duration + padding;
@@ -516,13 +504,25 @@
             };
             const contentType = document.getElementById('content-type-select').value;
 
-            if (isRecording && (!totalDuration || totalDuration < 1)) { showNotification('A valid duration is required for recording.', 'error'); return; }
-            if (isRecording && !metadata.title) { showNotification('A title is required for recording.', 'error'); return; }
+            if (commitMode !== 'live' && (!totalDuration || totalDuration < 1)) { 
+                showNotification('A valid duration is required for recording.', 'error'); 
+                return;
+            }
+            if (commitMode !== 'live' && !metadata.title) { 
+                showNotification('A title is required for recording.', 'error'); 
+                return;
+            }
 
             try {
                 const response = await fetch('/api/pretune/commit', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tuner_ip: activeTunerIp, record: isRecording, duration: totalDuration, metadata: metadata, content_type: contentType })
+                    body: JSON.stringify({ 
+                        tuner_ip: activeTunerIp, 
+                        duration: totalDuration, 
+                        metadata: metadata, 
+                        content_type: contentType,
+                        commit_mode: commitMode
+                    })
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || 'Failed to commit stream.');
@@ -552,7 +552,6 @@
         
         document.addEventListener('DOMContentLoaded', () => {
             fetchTunerStatus();
-            setMode('watch');
             document.querySelector('.tv-show-fields').style.display = 'none';
             setInterval(fetchTunerStatus, 5000);
         });

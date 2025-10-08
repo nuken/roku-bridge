@@ -237,11 +237,10 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
 
     encoder_url = tuner['encoder_url']
     duration_seconds = duration_minutes * 60
-
+    
     title = metadata.get('title', 'On-Demand Recording')
     year = metadata.get('year', '')
     
-    # Sanitize the base title
     sanitized_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
 
     if content_type == 'movie':
@@ -291,6 +290,94 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         
     except Exception as e:
         logging.error(f"[Recording] Failed to start local recording: {e}")
+        
+def create_dvr_job(tuner_ip, duration_minutes, metadata):
+    if not CHANNELS_DVR_IP:
+        logging.error("[Recording] Channels DVR IP is not configured. Cannot create job.")
+        return
+
+    tuner_name = next((t.get("name", t['roku_ip']) for t in TUNERS if t['roku_ip'] == tuner_ip), "Unknown")
+    
+    ondemand_channel_number = None
+    try:
+        dvr_channels_res = requests.get(f"http://{CHANNELS_DVR_IP}:8089/devices/ANY/channels", timeout=10)
+        dvr_channels_res.raise_for_status()
+        dvr_channels = dvr_channels_res.json()
+
+        target_guide_name = f"On-Demand Stream ({tuner_name})"
+        ondemand_channel = next((ch for ch in dvr_channels if ch.get('GuideName') == target_guide_name), None)
+
+        if ondemand_channel:
+            ondemand_channel_number = ondemand_channel.get('GuideNumber')
+            logging.info(f"[Recording] Found on-demand channel number: {ondemand_channel_number}")
+        else:
+            logging.error(f"[Recording] Could not find channel named '{target_guide_name}' in DVR. Please ensure the M3U source is correctly configured and refreshed.")
+            return
+            
+    except Exception as e:
+        logging.error(f"[Recording] Failed to get channels from DVR: {e}")
+        return
+
+    try:
+        current_time = int(time.time())
+        duration_seconds = duration_minutes * 60
+        
+        recording_payload = {
+            "Channel": ondemand_channel_number,
+            "Time": current_time,
+            "Duration": duration_seconds,
+        }
+
+        logging.info(f"[Recording] Sending simple recording request for channel {ondemand_channel_number}")
+        record_res = requests.post(
+            f"http://{CHANNELS_DVR_IP}:8089/dvr/jobs/new",
+            json=recording_payload,
+            timeout=10
+        )
+        record_res.raise_for_status()
+        
+        time.sleep(2) 
+
+        files_res = requests.get(f"http://{CHANNELS_DVR_IP}:8089/dvr/files", timeout=10)
+        files_res.raise_for_status()
+        all_files = files_res.json()
+        
+        latest_file = None
+        for f in sorted(all_files, key=lambda x: x.get('CreatedAt', 0), reverse=True):
+            airing = f.get('Airing', {})
+            if airing.get('Channel') == ondemand_channel_number and not f.get('Processed', True):
+                latest_file = f
+                break
+        
+        if latest_file:
+            file_id = latest_file.get('ID')
+            logging.info(f"[Recording] Found new recording File ID: {file_id}. Now updating metadata.")
+            
+            metadata_payload = {
+                "Title": metadata.get('title') or "On-Demand Recording",
+                "EpisodeTitle": metadata.get('subtitle'),
+                "Summary": metadata.get('description'),
+                "Image": metadata.get('image'),
+                "Genres": ["On-Demand"]
+            }
+            metadata_payload = {k: v for k, v in metadata_payload.items() if v}
+            
+            meta_res = requests.put(
+                f"http://{CHANNELS_DVR_IP}:8089/dvr/files/{file_id}/metadata",
+                json=metadata_payload,
+                timeout=10
+            )
+            meta_res.raise_for_status()
+            logging.info(f"[Recording] Successfully updated metadata for File ID: {file_id}")
+            
+        else:
+            logging.warning("[Recording] Could not find the new recording file to update its metadata. It will have a generic name.")
+
+    except requests.exceptions.HTTPError as e:
+        logging.error(f"[Recording] HTTP Error from DVR: {e.response.status_code}")
+        logging.error(f"[Recording] Response: {e.response.text}")
+    except Exception as e:
+        logging.error(f"[Recording] Unexpected error: {e}")
 
 def start_preview_session(tuner_ip):
     with TUNER_LOCK:
@@ -310,7 +397,7 @@ def stop_preview_session(tuner_ip):
     release_tuner(tuner_ip)
     return {"status": "success", "message": "Session stopped."}
 
-def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, content_type='movie'):
+def commit_preview_session(tuner_ip, duration, metadata, content_type, commit_mode):
     with SESSION_LOCK:
         if tuner_ip not in PREVIEW_SESSIONS:
             return {"status": "error", "message": "No active preview session."}
@@ -319,14 +406,19 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, co
         session['committed'] = True
         tuner_name = session['tuner']['name']
         
-        if record and duration > 0:
+        if commit_mode == 'local_record':
             logging.info(f"Committing tuner {tuner_name} for local recording.")
             start_local_recording(tuner_ip, duration, metadata, content_type)
             session['is_recording_queued'] = True
             return {"status": "success", "message": "Local recording started."}
+        elif commit_mode == 'dvr_record':
+            logging.info(f"Committing tuner {tuner_name} for Channels DVR recording.")
+            create_dvr_job(tuner_ip, duration, metadata)
+            session['is_recording_queued'] = True
+            return {"status": "success", "message": "Channels DVR recording job created."}
         else:
             logging.info(f"Committed session for tuner {tuner_name} for live viewing.")
-            return {"status": "success", "message": "Stream is now ready for Channels DVR."}
+            return {"status": "success", "message": "Stream is now ready."}
 
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
@@ -370,6 +462,41 @@ def stream_ondemand():
     generator = stream_generator(tuner['encoder_url'], tuner['roku_ip'], tuner_mode)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
+def generate_m3u_from_channels(channel_list, playlist_filter=None):
+    m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
+    filtered_list = [ch for ch in channel_list if not playlist_filter or ch.get('playlist') == playlist_filter]
+    for channel in filtered_list:
+        stream_url = f"http://{request.host}/stream/{channel['id']}"
+        extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
+        tags = {"tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo", "tvc-guide-stationid": "tvc_guide_stationid"}
+        for tag, key in tags.items():
+            if key in channel: extinf_line += f' {tag}="{channel[key]}"'
+        if 'playlist' in channel and channel['playlist']: extinf_line += f' group-title="{channel["playlist"]}"'
+        extinf_line += f',{channel["name"]}'
+        m3u_content.extend([extinf_line, stream_url])
+    return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
+
+@app.route('/channels.m3u')
+def generate_gracenote_m3u(): return generate_m3u_from_channels(CHANNELS, request.args.get('playlist'))
+
+@app.route('/epg_channels.m3u')
+def generate_epg_m3u(): return generate_m3u_from_channels(EPG_CHANNELS, request.args.get('playlist'))
+
+@app.route('/ondemand.m3u')
+def generate_ondemand_m3u():
+    m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
+    for idx, tuner in enumerate(TUNERS, start=20000):
+        tuner_name = tuner.get("name", tuner['roku_ip'])
+        channel_id = f"ondemand_stream_{tuner_name.replace(' ', '_')}"
+        stream_url = f"http://{request.host}/stream/ondemand_stream?tuner_ip={tuner['roku_ip']}"
+        channel_name = f"On-Demand Stream ({tuner_name})"
+        extinf_line = f'#EXTINF:-1 channel-id="{channel_id}" channel-number="{idx}" tvg-name="{channel_name}"'
+        if ONDEMAND_SETTINGS.get('tvg_logo'): extinf_line += f' tvg-logo="{ONDEMAND_SETTINGS["tvg_logo"]}"'
+        if ONDEMAND_SETTINGS.get('tvc_guide_art'): extinf_line += f' tvc-guide-art="{ONDEMAND_SETTINGS["tvc_guide_art"]}"'
+        extinf_line += f',{channel_name}'
+        m3u_content.extend([extinf_line, stream_url])
+    return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
+
 @app.route('/')
 def index(): return f"Roku Channels Bridge is running. <a href='/status'>View Status</a>"
 
@@ -378,7 +505,7 @@ def remote_control(): return render_template('remote.html')
 
 @app.route('/preview')
 def preview():
-    all_channels = sorted(CHANNELS + EPG_CHANNELS, key=lambda x: x.get('name', '').lower())
+    all_channels = sorted((CHANNELS or []) + (EPG_CHANNELS or []), key=lambda x: x.get('name', '').lower())
     return render_template('preview.html', channels=all_channels)
 
 @app.route('/pretune')
@@ -418,7 +545,7 @@ def api_config():
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
             return jsonify(config_data)
         except FileNotFoundError:
-            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""})
+            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": "" })
         except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])
@@ -533,12 +660,12 @@ def api_pretune_stop():
 def api_pretune_commit():
     data = request.get_json()
     tuner_ip = data.get('tuner_ip')
-    record = data.get('record', False)
     duration = data.get('duration', 0)
     metadata = data.get('metadata', {})
     content_type = data.get('content_type', 'movie')
+    commit_mode = data.get('commit_mode', 'live')
     if not tuner_ip: return jsonify({"status": "error", "message": "Tuner IP is required."}), 400
-    result = commit_preview_session(tuner_ip, record, duration, metadata, content_type)
+    result = commit_preview_session(tuner_ip, duration, metadata, content_type, commit_mode)
     return jsonify(result), 200 if result['status'] == 'success' else 409
     
 @app.route('/api/pretune/fetch_info', methods=['POST'])
