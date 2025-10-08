@@ -126,6 +126,7 @@ def release_tuner(tuner_ip):
                     tuner['in_use'] = False
                     if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name')}")
                     try:
+                        logging.info(f"Sending 'Home' command to Roku at {tuner_ip}.")
                         roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
                     except requests.exceptions.RequestException:
                         pass

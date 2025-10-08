@@ -81,28 +81,14 @@
             }
         }
         
+        // Corrected function: Simply cleaning up the player is the correct way
+        // to terminate the stream. The server will automatically handle releasing
+        // the tuner and sending the "Home" command when the stream connection is closed.
         function stopPreview() {
-            // First, tell the server to release the tuner and send the Roku home
-            fetch('/api/preview/stop', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        console.log("Successfully released tuner.");
-                    } else {
-                        console.warn("Could not release tuner via API, but cleaning up player anyway.", data.message);
-                    }
-                })
-                .catch(error => {
-                    console.error("Error calling stop preview API:", error);
-                })
-                .finally(() => {
-                    // This will stop the video and close the connection,
-                    // which also triggers the server to release the tuner.
-                    // This acts as a fallback if the API call fails.
-                    cleanupPlayer();
-                });
+            cleanupPlayer();
         }
         
+        // Add a listener to ensure cleanup happens if the user navigates away
         window.addEventListener('beforeunload', cleanupPlayer);
 
         function playChannel(channelId, element) {
