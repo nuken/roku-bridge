@@ -95,6 +95,7 @@
                 {% endif %}
             </p>
         </div>
+
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-satellite-dish"></i> Tuners</h2></div>
         <div class="table-wrapper"><table id="tuners-table"><thead><tr><th>Name</th><th>Roku IP</th><th>Encoder URL</th><th>Priority</th><th>Encoding Mode</th><th>Actions</th></tr></thead><tbody id="tuners-table-body"></tbody></table></div>
         <button class="button" onclick="openTunerModal()"><i class="fa-solid fa-plus"></i> Add Tuner</button>
@@ -330,7 +331,7 @@
 
         function openModal(id) { document.getElementById(id).style.display = 'block'; }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-
+        
         function populateOptionalFieldsDropdown() {
             const select = document.getElementById('optional-field-select');
             select.innerHTML = '<option value="">-- Select a field to add --</option>';

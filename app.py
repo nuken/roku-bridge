@@ -420,6 +420,7 @@ def commit_preview_session(tuner_ip, duration, metadata, content_type, commit_mo
             logging.info(f"Committed session for tuner {tuner_name} for live viewing.")
             return {"status": "success", "message": "Stream is now ready."}
 
+
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
     is_preview = request.args.get('preview', 'false').lower() == 'true'
