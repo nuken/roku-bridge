@@ -82,8 +82,25 @@
         }
         
         function stopPreview() {
-            cleanupPlayer();
-            fetch('/api/preview/stop', { method: 'POST' });
+            // First, tell the server to release the tuner and send the Roku home
+            fetch('/api/preview/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        console.log("Successfully released tuner.");
+                    } else {
+                        console.warn("Could not release tuner via API, but cleaning up player anyway.", data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error("Error calling stop preview API:", error);
+                })
+                .finally(() => {
+                    // This will stop the video and close the connection,
+                    // which also triggers the server to release the tuner.
+                    // This acts as a fallback if the API call fails.
+                    cleanupPlayer();
+                });
         }
         
         window.addEventListener('beforeunload', cleanupPlayer);
