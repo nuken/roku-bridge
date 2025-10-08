@@ -79,6 +79,7 @@
         <div class="top-actions">
             <button class="button" onclick="fetchStatus()"><i class="fa-solid fa-sync"></i> Refresh Status</button>
             <a href="/remote" class="button">Go to Remote</a>
+            <a href="/preview" class="button">Live TV Preview</a>
             <a href="/pretune" class="button">On-Demand Pre-Tune</a>
         </div>
         <div class="table-wrapper"><table id="status-table"><thead><tr><th>Tuner Name</th><th>Roku IP</th><th>Encoder URL</th><th style="text-align: center;">Status</th></tr></thead><tbody id="status-table-body"></tbody></table></div>
@@ -146,6 +147,14 @@
             <div class="form-group">
                 <label for="channels-dvr-ip">Channels DVR IP Address (Optional)</label>
                 <input type="text" id="channels-dvr-ip" placeholder="e.g., 192.168.1.100">
+            </div>
+            <div class="form-group">
+                <label for="ondemand-settings-logo">On-Demand Logo URL</label>
+                <input type="text" id="ondemand-settings-logo" placeholder="Enter a URL for the On-Demand logo">
+            </div>
+            <div class="form-group">
+                <label for="ondemand-settings-art">On-Demand Art URL</label>
+                <input type="text" id="ondemand-settings-art" placeholder="Enter a URL for the On-Demand art">
             </div>
         </div>
 
