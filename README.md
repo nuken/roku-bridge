@@ -1,6 +1,6 @@
 # **Roku Channels Bridge**
 
-**Release: Beta 4.5**
+**Release: Beta 4.5.1**
 
 [**Official Configuration Guide**](https://tuner.ct.ws)
 
@@ -156,4 +156,5 @@ While all settings can be managed through the web interface, the configuration i
       "roku_app_id": "13"
     }
 ]
+
 ```
