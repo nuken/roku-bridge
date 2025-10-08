@@ -272,6 +272,11 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         RECORDING_PROCESSES[tuner_ip] = process
         logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
         
+        with SESSION_LOCK:
+            if tuner_ip in PREVIEW_SESSIONS:
+                PREVIEW_SESSIONS[tuner_ip]['recording_start_time'] = time.time()
+                PREVIEW_SESSIONS[tuner_ip]['recording_duration'] = duration_seconds
+        
         threading.Timer(duration_seconds + 5, release_tuner, args=[tuner_ip]).start()
         
     except Exception as e:
@@ -514,22 +519,28 @@ def api_plugins():
 def api_pretune_status():
     with SESSION_LOCK:
         active_preview_ips = set(PREVIEW_SESSIONS.keys())
+        preview_sessions_copy = dict(PREVIEW_SESSIONS)
     status = []
     with TUNER_LOCK:
         for tuner in TUNERS:
             tuner_status = "available"
+            recording_end_time = None
             if tuner.get('in_use'):
                 tuner_status = "in-use"
             elif tuner['roku_ip'] in active_preview_ips:
-                 session = PREVIEW_SESSIONS[tuner['roku_ip']]
-                 if session.get('is_recording_queued'):
-                     tuner_status = "recording"
-                 else:
-                     tuner_status = "pre-tuning"
+                 session = preview_sessions_copy.get(tuner['roku_ip'])
+                 if session:
+                    if session.get('is_recording_queued'):
+                        tuner_status = "recording"
+                        if 'recording_start_time' in session and 'recording_duration' in session:
+                            recording_end_time = session['recording_start_time'] + session['recording_duration']
+                    else:
+                        tuner_status = "pre-tuning"
             status.append({
                 "name": tuner.get("name", tuner['roku_ip']),
                 "roku_ip": tuner['roku_ip'],
-                "status": tuner_status
+                "status": tuner_status,
+                "recording_end_time": recording_end_time
             })
     return jsonify(status)
 
