@@ -1,6 +1,6 @@
 # **Roku Channels Bridge**
 
-**Release: Beta 4.5**
+**Release: Beta 5.0.4**
 
 [**Official Configuration Guide**](https://tuner.ct.ws)
 
@@ -39,14 +39,12 @@ The easiest way to run the application is with Docker Compose.
 3.  Create a file named `docker-compose.yml` in the main folder and add the following content:
 
     ```yaml
-    version: '3.7'
-
     services:
       roku-bridge:
         image: rcvaughn2/roku-ecp-tuner:stream
-        container_name: roku-channels-bridge
+        container_name: roku-bridge-stream
         ports:
-          - "5006:5000" # Host port : Container port
+          - "5007:5000" # Host port : Container port
         volumes:
           - roku-bridge-config:/app/config
           - ./recordings:/app/recordings
@@ -65,7 +63,7 @@ The easiest way to run the application is with Docker Compose.
 
 ### **Step 3: Configure Your Tuners & Channels**
 
-Once the container is running, open your web browser and navigate to `http://<your-ip>:5006/status` to access the configuration panel.
+Once the container is running, open your web browser and navigate to `http://<your-ip>:5007/status` to access the configuration panel.
 
 - **Tuners**: Add each of your Roku devices by providing a name, its IP address, and the URL of its corresponding HDMI encoder stream.
 - **Integrations**: Add your TMDb API key to enable online metadata searching.
@@ -74,7 +72,7 @@ Once the container is running, open your web browser and navigate to `http://<yo
 
 This feature is designed to give you perfect, clean recordings of on-demand content from any Roku app.
 
-1.  **Navigate to Pre-Tune**: Open `http://<your-ip>:5006/pretune`.
+1.  **Navigate to Pre-Tune**: Open `http://<your-ip>:5007/pretune`.
 
 2.  **Start a Session**: Select an available tuner from the list and click "Start". A live video preview from the Roku will appear.
 
@@ -96,9 +94,9 @@ This feature is designed to give you perfect, clean recordings of on-demand cont
 
 This bridge generates three M3U playlist files. The URLs are conveniently displayed on the Status page.
 
-  * **Gracenote M3U URL:** `http://<IP_OF_DOCKER_HOST>:5006/channels.m3u`
-  * **Custom EPG M3U URL:** `http://<IP_OF_DOCKER_HOST>:5006/epg_channels.m3u`
-  * **On-Demand M3U URL:** `http://<IP_OF_DOCKER_HOST>:5006/ondemand.m3u`
+  * **Gracenote M3U URL:** `http://<IP_OF_DOCKER_HOST>:5007/channels.m3u`
+  * **Custom EPG M3U URL:** `http://<IP_OF_DOCKER_HOST>:5007/epg_channels.m3u`
+  * **On-Demand M3U URL:** `http://<IP_OF_DOCKER_HOST>:5007/ondemand.m3u`
 
 To add a source, open your Channels DVR server settings, go to "Sources," click "+ Add Source," choose "Custom Channels," and enter the desired M3U URL.
 
@@ -119,20 +117,20 @@ You can organize your live TV channels into smaller, more manageable groups by u
 
     **Examples:**
 
-      * `http://<IP_OF_DOCKER_HOST>:5006/channels.m3u?playlist=YTTV`
-      * `http://<IP_OF_DOCKER_HOST>:5006/epg_channels.m3u?playlist=Philo`
+      * `http://<IP_OF_DOCKER_HOST>:5007/channels.m3u?playlist=YTTV`
+      * `http://<IP_OF_DOCKER_HOST>:5007/epg_channels.m3u?playlist=Philo`
 
     You can add each filtered URL as a separate "Custom Channels" source in Channels DVR, making it easier to manage large numbers of channels.
 
 ### **Web Interface**
 
-  * **Status & Config Page:** `http://<IP_OF_DOCKER_HOST>:5006/status`
+  * **Status & Config Page:** `http://<IP_OF_DOCKER_HOST>:5007/status`
       * Monitor the online/offline status of your Rokus and encoders.
       * Add, edit, and delete all tuners, channels, and on-demand apps.
       * Download or upload your configuration file.
-  * **Remote Control:** `http://<IP_OF_DOCKER_HOST>:5006/remote`
+  * **Remote Control:** `http://<IP_OF_DOCKER_HOST>:5007/remote`
       * A full-featured remote for any configured Roku.
-  * **On-Demand Pre-Tuning:** `http://<IP_OF_DOCKER_HOST>:5006/pretune`
+  * **On-Demand Pre-Tuning:** `http://<IP_OF_DOCKER_HOST>:5007/pretune`
       * A "Mission Control" page to launch on-demand apps and send them to Channels DVR.
 
 ## **Using the On-Demand Pre-Tuning Feature**
@@ -140,7 +138,7 @@ You can organize your live TV channels into smaller, more manageable groups by u
 This feature allows you to stream content from any non-live TV app (like Max, Netflix, Hulu, etc.) to Channels DVR. It solves the issue of stream delays by letting you prepare the content *before* sending it to your DVR.
 
 1.  **Add Your Apps:** On the main Status page, add the on-demand apps you want to use.
-2.  **Open the Pre-Tune Page:** Navigate to `http://<IP_OF_DOCKER_HOST>:5006/pretune`. The page will automatically lock the first available tuner and start a live video preview.
+2.  **Open the Pre-Tune Page:** Navigate to `http://<IP_OF_DOCKER_HOST>:5007/pretune`. The page will automatically lock the first available tuner and start a live video preview.
 3.  **Launch an App:** Select an app from the dropdown menu to launch it on the Roku.
 4.  **Navigate and Play:** Use the on-screen remote controls (or the full remote on a desktop) to navigate the app and start playing the movie or show you want to watch.
 5.  **Send to Channels:** Once the content is playing in the preview window, click the **"Send to Channels DVR"** button.
