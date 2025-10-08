@@ -47,7 +47,6 @@ logging.basicConfig(level=logging.INFO, format=log_format)
 root_logger = logging.getLogger()
 deque_handler = DequeLogHandler(log_buffer)
 formatter = logging.Formatter(log_format)
-deque_handler.setFormatter(formatter)
 root_logger.addHandler(deque_handler)
 
 # --- Environment & Global Variables ---
@@ -240,15 +239,33 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     
     title = metadata.get('title', 'On-Demand Recording')
     year = metadata.get('year', '')
-    filename_base = f"{title} ({year})" if year else title
     
-    filename_base = "".join([c for c in filename_base if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+    # Sanitize title
+    safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+
+    if content_type == 'movie':
+        filename = f"{safe_title} ({year}).mkv" if year else f"{safe_title}.mkv"
+        content_path = os.path.join(RECORDINGS_DIR, 'Movies')
+        os.makedirs(content_path, exist_ok=True)
+        output_path = os.path.join(content_path, filename)
+        artwork_path = os.path.join(content_path, f"{safe_title}-poster.jpg")
     
-    content_path = os.path.join(RECORDINGS_DIR, 'Movies' if content_type == 'movie' else 'TV Shows')
-    os.makedirs(content_path, exist_ok=True)
-    
-    output_path = os.path.join(content_path, f"{filename_base}.mkv")
-    
+    elif content_type == 'show':
+        season_num = metadata.get('season_number', '01')
+        episode_num = metadata.get('episode_number', '01')
+        episode_title = metadata.get('subtitle', 'Episode ' + episode_num)
+        safe_episode_title = "".join([c for c in episode_title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+
+        filename = f"{safe_title} - S{season_num.zfill(2)}E{episode_num.zfill(2)} - {safe_episode_title}.mkv"
+        content_path = os.path.join(RECORDINGS_DIR, 'TV Shows', safe_title, f"Season {season_num.zfill(2)}")
+        os.makedirs(content_path, exist_ok=True)
+        output_path = os.path.join(content_path, filename)
+        artwork_path = os.path.join(content_path, f"{safe_title}-poster.jpg")
+
+    else:
+        logging.error(f"[Recording] Invalid content type: {content_type}")
+        return
+
     command = [
         'ffmpeg', '-i', encoder_url, '-t', str(duration_seconds),
         '-c', 'copy', '-map', '0', 
@@ -262,7 +279,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
             try:
                 img_res = requests.get(metadata['image'], timeout=10)
                 img_res.raise_for_status()
-                with open(os.path.join(content_path, f"{filename_base}-poster.jpg"), 'wb') as f:
+                with open(artwork_path, 'wb') as f:
                     f.write(img_res.content)
                 logging.info("[Recording] Artwork downloaded successfully.")
             except Exception as e:
