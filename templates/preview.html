@@ -84,8 +84,18 @@
         // Corrected function: Simply cleaning up the player is the correct way
         // to terminate the stream. The server will automatically handle releasing
         // the tuner and sending the "Home" command when the stream connection is closed.
-        function stopPreview() {
+        async function stopPreview() {
             cleanupPlayer();
+            try {
+                const response = await fetch('/api/preview/stop', { method: 'POST' });
+                const result = await response.json();
+                console.log(result.message);
+            } catch (error) {
+                console.error('Failed to stop preview session:', error);
+            }
+            setTimeout(() => {
+                window.location.reload();
+            }, 250);
         }
         
         // Add a listener to ensure cleanup happens if the user navigates away
