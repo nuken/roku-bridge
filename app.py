@@ -20,7 +20,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.1"
+APP_VERSION = "4.5.2"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -114,22 +114,26 @@ def release_tuner(tuner_ip):
         stop_event.set()
         thread.join(timeout=5)
 
+    was_in_preview = False
     with SESSION_LOCK:
         if tuner_ip in PREVIEW_SESSIONS:
+            was_in_preview = True
             del PREVIEW_SESSIONS[tuner_ip]
             logging.info(f"Cleared preview session for tuner {tuner_ip}")
 
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
-                if tuner['in_use']:
+                if tuner.get('in_use') or was_in_preview:
                     tuner['in_use'] = False
-                    if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name')}")
+                    logging.info(f"Released tuner: {tuner.get('name')}. Sending Home keypress.")
                     try:
-                        logging.info(f"Sending 'Home' command to Roku at {tuner_ip}.")
-                        roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
-                    except requests.exceptions.RequestException:
-                        pass
+                        # Send Home keypress multiple times for reliability
+                        for _ in range(3):
+                            roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
+                            time.sleep(0.2)
+                    except requests.exceptions.RequestException as e:
+                        logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
                 break
 
 def send_key_sequence(device_ip, keys):
