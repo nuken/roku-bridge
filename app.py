@@ -122,15 +122,17 @@ def release_tuner(tuner_ip):
         stop_event.set()
         thread.join(timeout=5)
     
+    was_in_preview = False
     with SESSION_LOCK:
         if tuner_ip in PREVIEW_SESSIONS:
+            was_in_preview = True
             del PREVIEW_SESSIONS[tuner_ip]
             logging.info(f"Cleared preview session for tuner {tuner_ip}")
 
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
-                if tuner.get('in_use') or tuner.get('roku_ip') in PREVIEW_SESSIONS:
+                if tuner.get('in_use') or was_in_preview:
                     tuner['in_use'] = False
                     logging.info(f"Released tuner: {tuner.get('name')}. Sending Home keypress.")
                     try:
