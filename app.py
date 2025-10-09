@@ -47,7 +47,6 @@ logging.basicConfig(level=logging.INFO, format=log_format)
 root_logger = logging.getLogger()
 deque_handler = DequeLogHandler(log_buffer)
 formatter = logging.Formatter(log_format)
-deque_handler.setFormatter(formatter)
 root_logger.addHandler(deque_handler)
 
 # --- Environment & Global Variables ---
@@ -131,13 +130,16 @@ def release_tuner(tuner_ip):
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
-                if tuner.get('in_use'):
+                if tuner.get('in_use') or tuner.get('roku_ip') in PREVIEW_SESSIONS:
                     tuner['in_use'] = False
-                    if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name')}")
+                    logging.info(f"Released tuner: {tuner.get('name')}. Sending Home keypress.")
                     try:
-                        roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
-                    except requests.exceptions.RequestException:
-                        pass
+                        # Send Home keypress multiple times for reliability
+                        for _ in range(3):
+                            roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
+                            time.sleep(0.2)
+                    except requests.exceptions.RequestException as e:
+                        logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
                 break
 
 def send_key_sequence(device_ip, keys):
