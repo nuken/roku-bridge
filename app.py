@@ -20,7 +20,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.2"
+APP_VERSION = "4.5.3"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -385,10 +385,16 @@ def api_config():
     if request.method == 'POST':
         try:
             new_config = request.get_json()
-            required_keys = ['tuners', 'channels', 'epg_channels', 'ondemand_apps', 'ondemand_settings']
-            if not all(k in new_config for k in required_keys):
-                return jsonify({"error": "Invalid configuration structure."}), 400
-            with open(CONFIG_FILE_PATH, 'w') as f: json.dump(new_config, f, indent=2)
+            # Ensure the structure is correct by creating a new dict with all required keys,
+            # getting the values from the received JSON, or using a default empty value.
+            validated_config = {
+                "tuners": new_config.get("tuners", []),
+                "channels": new_config.get("channels", []),
+                "epg_channels": new_config.get("epg_channels", []),
+                "ondemand_apps": new_config.get("ondemand_apps", []),
+                "ondemand_settings": new_config.get("ondemand_settings", {})
+            }
+            with open(CONFIG_FILE_PATH, 'w') as f: json.dump(validated_config, f, indent=2)
             load_config()
             os.kill(os.getppid(), signal.SIGHUP)
             return jsonify({"message": "Configuration saved. Server is reloading."}), 200
@@ -397,6 +403,9 @@ def api_config():
     else: # GET
         try:
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
+            # Also ensure the GET response provides the full structure
+            config_data['ondemand_apps'] = config_data.get('ondemand_apps', [])
+            config_data['ondemand_settings'] = config_data.get('ondemand_settings', {})
             return jsonify(config_data)
         except FileNotFoundError:
             return jsonify({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}})
@@ -566,3 +575,4 @@ def api_plugins():
 if __name__ != '__main__':
 
     load_config()
+
