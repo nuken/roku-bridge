@@ -584,6 +584,18 @@ def api_pretune_commit():
     result = commit_preview_session(tuner_ip, record, duration, metadata, content_type)
     return jsonify(result), 200 if result['status'] == 'success' else 409
     
+@app.route('/api/release_all_tuners', methods=['POST'])
+def api_release_all_tuners():
+    try:
+        with TUNER_LOCK:
+            for tuner in TUNERS:
+                if tuner.get('in_use') or tuner.get('roku_ip') in PREVIEW_SESSIONS:
+                    release_tuner(tuner.get('roku_ip'))
+        return jsonify({"status": "success", "message": "All tuners have been released."})
+    except Exception as e:
+        logging.error(f"Error releasing all tuners: {e}")
+        return jsonify({"status": "error", "message": "An error occurred while releasing tuners."}), 500
+
 @app.route('/api/pretune/fetch_info', methods=['POST'])
 def api_fetch_info():
     tuner_ip = request.json.get('tuner_ip')
