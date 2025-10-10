@@ -485,8 +485,6 @@
                 cleanupPlayer();
                 activeTunerIp = null;
                 
-                // --- START OF FIX ---
-                // Reset the form fields and mode after a recording is successfully started
                 if (isRecording) {
                     document.getElementById('title-input').value = '';
                     document.getElementById('subtitle-input').value = '';
@@ -494,11 +492,13 @@
                     document.getElementById('image-input').value = '';
                     setMode('watch');
                 }
-                // --- END OF FIX ---
 
                 fetchTunerStatus();
                 
-            } catch (error) { showNotification(`Error: ${error.message}`, 'error'); }
+            } catch (error) { 
+                showNotification(`Error: ${error.message}`, 'error'); 
+                fetchTunerStatus(); // Also refresh status on error to get correct state
+            }
         }
         
         window.addEventListener('beforeunload', () => {

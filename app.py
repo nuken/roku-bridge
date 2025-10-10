@@ -259,6 +259,16 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
+def download_artwork(url, path):
+    try:
+        img_res = requests.get(url, timeout=10)
+        img_res.raise_for_status()
+        with open(path, 'wb') as f:
+            f.write(img_res.content)
+        logging.info("[Recording] Artwork downloaded successfully.")
+    except Exception as e:
+        logging.error(f"[Recording] Failed to download artwork: {e}")
+
 def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
     if not tuner:
@@ -306,15 +316,9 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     ]
 
     try:
+        # Submit artwork download to thread pool so it doesn't block the main thread
         if metadata.get('image'):
-            try:
-                img_res = requests.get(metadata['image'], timeout=10)
-                img_res.raise_for_status()
-                with open(artwork_path, 'wb') as f:
-                    f.write(img_res.content)
-                logging.info("[Recording] Artwork downloaded successfully.")
-            except Exception as e:
-                logging.error(f"[Recording] Failed to download artwork: {e}")
+            executor.submit(download_artwork, metadata['image'], artwork_path)
 
         process = subprocess.Popen(command)
         RECORDING_PROCESSES[tuner_ip] = process
@@ -328,7 +332,11 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         threading.Timer(duration_seconds + 5, release_tuner, args=[tuner_ip]).start()
         
     except Exception as e:
-        logging.error(f"[Recording] Failed to start local recording: {e}")
+        logging.error(f"[Recording] Failed to start FFMPEG process: {e}")
+        # If ffmpeg fails, revert the recording state
+        with SESSION_LOCK:
+            if tuner_ip in PREVIEW_SESSIONS:
+                PREVIEW_SESSIONS[tuner_ip]['is_recording_queued'] = False
 
 def start_preview_session(tuner_ip):
     with TUNER_LOCK:
@@ -354,16 +362,21 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, co
             return {"status": "error", "message": "No active preview session."}
         
         session = PREVIEW_SESSIONS[tuner_ip]
-        session['committed'] = True
         tuner_name = session['tuner']['name']
         
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for local recording.")
-            start_local_recording(tuner_ip, duration, metadata, content_type)
+            # Set the recording state *before* starting the process to ensure a fast UI update
+            session['committed'] = True
             session['is_recording_queued'] = True
+            
+            # Now start the potentially long-running process
+            start_local_recording(tuner_ip, duration, metadata, content_type)
+            
             return {"status": "success", "message": "Local recording started."}
         else:
             logging.info(f"Committed session for tuner {tuner_name} for live viewing.")
+            session['committed'] = True
             return {"status": "success", "message": "Stream is now ready for Channels DVR."}
 
 @app.route('/stream/<channel_id>')
