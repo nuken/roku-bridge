@@ -81,16 +81,36 @@ executor = ThreadPoolExecutor(max_workers=10)
 
 def load_config():
     global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY
+    default_config = {
+        "tuners": [], "channels": [], "epg_channels": [], 
+        "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""
+    }
+    
     if not os.path.exists(CONFIG_FILE_PATH):
         logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating default.")
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""}, f, indent=2)
+                json.dump(default_config, f, indent=2)
         except Exception as e:
             logging.error(f"Could not create default config: {e}")
+
     try:
-        with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f) or {}
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            config_data = json.load(f) or {}
+
+        config_updated = False
+        for key, default_value in default_config.items():
+            if key not in config_data:
+                config_data[key] = default_value
+                config_updated = True
+                logging.info(f"Adding missing required field '{key}' to the configuration.")
+
+        if config_updated:
+            with open(CONFIG_FILE_PATH, 'w') as f:
+                json.dump(config_data, f, indent=2)
+            logging.info("Configuration file was updated with missing fields.")
+
         TUNERS = sorted(config_data.get('tuners', []), key=lambda x: x.get('priority', 99))
         for tuner in TUNERS:
             tuner['in_use'] = False
@@ -99,9 +119,11 @@ def load_config():
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
         ONDEMAND_SETTINGS = config_data.get('ondemand_settings', {})
         TMDB_API_KEY = config_data.get('tmdb_api_key', '')
+        
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
-        if TMDB_API_KEY: logging.info("TMDb API Key is configured.")
+        if TMDB_API_KEY: 
+            logging.info("TMDb API Key is configured.")
 
     except Exception as e:
         logging.error(f"Error loading config: {e}")
@@ -253,7 +275,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
             filename_base = title
     else:
         filename_base = f"{title} ({year})" if year else title
-
+    
     filename_base = "".join([c for c in filename_base if c.isalpha() or c.isdigit() or c==' ' or c=='-']).rstrip()
     
     content_path = os.path.join(RECORDINGS_DIR, 'Movies' if content_type == 'movie' else 'TV Shows')
