@@ -81,7 +81,6 @@
             <a href="/remote" class="button">Go to Remote</a>
             <a href="/preview" class="button">Live TV Preview</a>
             <a href="/pretune" class="button">On-Demand Pre-Tune</a>
-            <button class="button" onclick="releaseAllTuners()"><i class="fa-solid fa-power-off"></i> Release All Tuners</button>
         </div>
         <div class="table-wrapper"><table id="status-table"><thead><tr><th>Tuner Name</th><th>Roku IP</th><th>Encoder URL</th><th style="text-align: center;">Status</th></tr></thead><tbody id="status-table-body"></tbody></table></div>
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-globe"></i> Global Settings</h2></div>
@@ -140,10 +139,14 @@
             <h2><i class="fa-solid fa-cogs"></i> Integrations</h2>
         </div>
         <div class="global-settings">
-            <p>Configure third-party services like TMDb for metadata lookup.</p>
+            <p>Configure third-party services like TMDb for metadata lookup and Channels DVR for recording.</p>
             <div class="form-group">
                 <label for="tmdb-api-key">TMDb API Key (v3 Auth)</label>
                 <input type="text" id="tmdb-api-key" placeholder="Enter your TMDb API key">
+            </div>
+            <div class="form-group">
+                <label for="channels-dvr-ip">Channels DVR IP Address (Optional)</label>
+                <input type="text" id="channels-dvr-ip" placeholder="e.g., 192.168.1.100">
             </div>
             <div class="form-group">
                 <label for="ondemand-settings-logo">On-Demand Logo URL</label>
@@ -203,7 +206,7 @@
     </div>
 
     <script>
-        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [], ondemand_settings: {}, tmdb_api_key: '' };
+        let appConfig = { tuners: [], channels: [], epg_channels: [], ondemand_apps: [], ondemand_settings: {}, tmdb_api_key: '', channels_dvr_ip: '' };
         let availablePlugins = [];
         const epgOptionalFields = [ 'channel-number', 'tvg-logo', 'tvc-guide-art', 'tvc-guide-title', 'tvc-guide-description', 'tvc-guide-tags', 'tvc-guide-genres', 'tvc-guide-categories', 'tvc-guide-placeholders', 'tvc-stream-vcodec', 'tvc-stream-acodec', 'tune_delay' ];
 
@@ -239,6 +242,7 @@
                     document.getElementById('ondemand-settings-art').value = appConfig.ondemand_settings.tvc_guide_art || '';
                 }
                 document.getElementById('tmdb-api-key').value = appConfig.tmdb_api_key || '';
+                document.getElementById('channels-dvr-ip').value = appConfig.channels_dvr_ip || '';
 
             } catch (error) { console.error('Failed to load config:', error); showNotification('Error loading configuration.', 'error'); }
         }
@@ -252,6 +256,7 @@
                     tvc_guide_art: document.getElementById('ondemand-settings-art').value
                 };
                 appConfig.tmdb_api_key = document.getElementById('tmdb-api-key').value;
+                appConfig.channels_dvr_ip = document.getElementById('channels-dvr-ip').value;
 
                 const response = await fetch(window.location.origin + '/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appConfig) });
                 const result = await response.json();
@@ -280,29 +285,11 @@
                 }
             }
 
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(fullUrl).then(() => {
-                    showNotification('URL copied to clipboard!', 'success');
-                }).catch(err => {
-                    showNotification('Failed to copy URL.', 'error');
-                });
-            } else {
-                // Fallback for non-secure contexts
-                const textArea = document.createElement("textarea");
-                textArea.value = fullUrl;
-                textArea.style.position = "fixed"; 
-                textArea.style.left = "-9999px";
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                    showNotification('URL copied to clipboard!', 'success');
-                } catch (err) {
-                    showNotification('Failed to copy URL.', 'error');
-                }
-                document.body.removeChild(textArea);
-            }
+            navigator.clipboard.writeText(fullUrl).then(() => {
+                showNotification('URL copied to clipboard!', 'success');
+            }).catch(err => {
+                showNotification('Failed to copy URL.', 'error');
+            });
         }
 
         function renderAllTables() {
@@ -539,21 +526,6 @@
                     if (cell) cell.innerHTML = (s.roku_status === 'online' && s.encoder_status === 'online') ? '<i class="fas fa-check-circle" title="Roku & Encoder Online"></i>' : `${s.roku_status === 'online' ? '<i class="fas fa-check-circle" title="Roku Online"></i>' : '<i class="fas fa-times-circle" title="Roku Offline"></i>'} ${s.encoder_status === 'online' ? '<i class="fas fa-check-circle" title="Encoder Online"></i>' : '<i class="fas fa-times-circle" title="Encoder Offline"></i>'}`;
                 });
             } catch (error) { console.error('Error fetching status:', error); tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--error-color);">Failed to load status.</td></tr>'; }
-        }
-
-        async function releaseAllTuners() {
-            try {
-                const response = await fetch(window.location.origin + '/api/release_all_tuners', { method: 'POST' });
-                const result = await response.json();
-                if (response.ok) {
-                    showNotification(result.message || 'All tuners released!', 'success');
-                    fetchStatus();
-                } else {
-                    throw new Error(result.message || 'Unknown error');
-                }
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'error');
-            }
         }
 
         function showNotification(message, type = 'success') {

@@ -158,16 +158,6 @@
                         <label for="title-input">Title</label>
                         <input type="text" id="title-input" placeholder="Enter title to search online">
                     </div>
-                    <div id="tv-show-fields" style="display: none;">
-                        <div class="form-group">
-                            <label for="season-number-input">Season Number</label>
-                            <input type="number" id="season-number-input" value="1" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label for="episode-number-input">Episode Number</label>
-                            <input type="number" id="episode-number-input" value="1" min="1">
-                        </div>
-                    </div>
                     <div class="form-group">
                         <label for="duration-input">Duration (minutes)</label>
                         <input type="number" id="duration-input" value="120" min="1">
@@ -230,14 +220,8 @@
         const videoElement = document.getElementById('video-player');
         const remoteOverlay = document.querySelector('.remote-overlay');
         const recordingOptions = document.getElementById('recording-options');
-        const contentTypeSelect = document.getElementById('content-type-select');
-        const tvShowFields = document.getElementById('tv-show-fields');
         let player, activeTunerIp = null;
         let currentMode = 'watch';
-
-        contentTypeSelect.addEventListener('change', () => {
-            tvShowFields.style.display = contentTypeSelect.value === 'show' ? 'block' : 'none';
-        });
 
         function setMode(mode) {
             currentMode = mode;
@@ -287,9 +271,7 @@
             listEl.innerHTML = tuners.map(tuner => `
                 <div class="tuner-item">
                     <span>${tuner.name}</span>
-                    <div>
-                        <span class="status ${tuner.status}">${tuner.status.replace('-', ' ')}</span>
-                    </div>
+                    <span class="status ${tuner.status}">${tuner.status.replace('-', ' ')}</span>
                     ${tuner.status === 'available' ? `<button class="start" onclick="handleSessionStart('${tuner.roku_ip}', false)">Start</button>` : ''}
                     ${(tuner.status !== 'available' && tuner.status !== 'in-use') ? `<button class="takeover" onclick="handleSessionStart('${tuner.roku_ip}', true)">Takeover</button>` : ''}
                 </div>
@@ -463,9 +445,7 @@
                 title: document.getElementById('title-input').value,
                 subtitle: document.getElementById('subtitle-input').value,
                 description: document.getElementById('description-input').value,
-                image: document.getElementById('image-input').value,
-                season_number: document.getElementById('season-number-input').value,
-                episode_number: document.getElementById('episode-number-input').value
+                image: document.getElementById('image-input').value
             };
             const contentType = document.getElementById('content-type-select').value;
 
@@ -484,21 +464,9 @@
                 
                 cleanupPlayer();
                 activeTunerIp = null;
-                
-                if (isRecording) {
-                    document.getElementById('title-input').value = '';
-                    document.getElementById('subtitle-input').value = '';
-                    document.getElementById('description-input').value = '';
-                    document.getElementById('image-input').value = '';
-                    setMode('watch');
-                }
-
                 fetchTunerStatus();
                 
-            } catch (error) { 
-                showNotification(`Error: ${error.message}`, 'error'); 
-                fetchTunerStatus(); // Also refresh status on error to get correct state
-            }
+            } catch (error) { showNotification(`Error: ${error.message}`, 'error'); }
         }
         
         window.addEventListener('beforeunload', () => {
@@ -514,7 +482,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             fetchTunerStatus();
             setMode('watch'); // Set initial mode
-            setInterval(fetchTunerStatus, 5000);
+            setInterval(fetchTunerStatus, 15000);
         });
     </script>
 </body>
