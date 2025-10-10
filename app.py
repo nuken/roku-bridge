@@ -271,8 +271,10 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
 
     if content_type == 'show':
         try:
-            season = int(metadata.get('season', 0))
-            episode = int(metadata.get('episode', 0))
+            season_str = metadata.get('season') or '0'
+            episode_str = metadata.get('episode') or '0'
+            season = int(season_str)
+            episode = int(episode_str)
             
             show_folder = os.path.join(RECORDINGS_DIR, 'TV Shows', safe_title)
             season_folder = os.path.join(show_folder, f"Season {season:02d}")
