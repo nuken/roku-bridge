@@ -243,11 +243,14 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     
     title = metadata.get('title', 'On-Demand Recording')
     year = metadata.get('year', '')
-    
+
     if content_type == 'show':
-        season = metadata.get('season', '')
-        episode = metadata.get('episode', '')
-        filename_base = f"{title} - s{season:02d}e{episode:02d}" if season and episode else title
+        try:
+            season = int(metadata.get('season', 0))
+            episode = int(metadata.get('episode', 0))
+            filename_base = f"{title} - s{season:02d}e{episode:02d}" if season and episode else title
+        except (ValueError, TypeError):
+            filename_base = title
     else:
         filename_base = f"{title} ({year})" if year else title
 
