@@ -42,16 +42,6 @@
         #search-tmdb-btn { background-color: #0d6efd; }
         .remote-button { background-color: var(--button-color); color: #fff; border: none; border-radius: 50%; width: 60px; height: 60px; font-size: 1.5em; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: background-color 0.2s, transform 0.1s; }
         .remote-button:active { transform: scale(0.95); background-color: #777; }
-        .full-remote { display: none; }
-        .grid-container { display: grid; gap: 15px; margin-top: 20px; }
-        .button-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; justify-items: center; }
-        .d-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 15px; }
-        .d-pad .remote-button { border-radius: 15px; }
-        #full-remote-up { grid-area: 1 / 2 / 2 / 3; }
-        #full-remote-left { grid-area: 2 / 1 / 3 / 2; }
-        #full-remote-ok { grid-area: 2 / 2 / 3 / 3; background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; }
-        #full-remote-right { grid-area: 2 / 3 / 3 / 4; }
-        #full-remote-down { grid-area: 3 / 2 / 4 / 3; }
         .remote-overlay { position: absolute; bottom: 0; left: 0; right: 0; padding: 15px; background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0)); display: grid; grid-template-areas: ". up ." "left ok right" ". down ."; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 10px; justify-items: center; align-items: center; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
         #button-up-overlay { grid-area: up; }
         #button-left-overlay { grid-area: left; }
@@ -88,12 +78,37 @@
         .modal-button.cancel { background-color: #6c757d; color: white; }
         .modal-button.confirm { background-color: var(--warn-color); color: #111; }
 
+        /* Floating Remote Styles */
+        #remote-modal {
+            display: none; position: fixed; z-index: 1002; left: 50px; top: 50px;
+            background-color: var(--surface-color); border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4); width: auto;
+        }
+        #remote-modal-header {
+            padding: 10px; cursor: move; background-color: var(--border-color);
+            border-top-left-radius: 20px; border-top-right-radius: 20px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        #remote-modal-header h3 { margin: 0; font-size: 1em; color: var(--primary-color); }
+        .remote-container { padding: 15px; }
+        .remote-grid { display: grid; gap: 10px; }
+        .remote-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; justify-items: center; }
+        .d-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 10px; }
+        .d-pad .remote-button { border-radius: 10px; }
+        .remote-button-small {
+            background-color: #555; color: #fff; border: none; border-radius: 50%;
+            width: 50px; height: 50px; font-size: 1.2em; cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .remote-button-small:active { background-color: #777; transform: scale(0.95); }
+        #modal-remote-ok { background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; }
+
         @media (min-width: 769px) {
             .pretune-container { flex-direction: row; }
             .controls-wrapper { width: 30%; max-width: 400px; }
             .video-wrapper { width: 70%; }
             .remote-overlay { display: none; }
-            .full-remote { display: block; }
         }
     </style>
 </head>
@@ -119,27 +134,7 @@
                         <option value="{{ app.roku_app_id }}">{{ app.name }}</option>
                     {% endfor %}
                 </select>
-             </div>
-             <div class="full-remote">
-                <div class="grid-container">
-                    <div class="button-row">
-                        <button class="remote-button" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
-                        <button class="remote-button" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
-                        <button class="remote-button" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
-                    </div>
-                    <div class="d-pad">
-                        <button class="remote-button" id="full-remote-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
-                        <button class="remote-button" id="full-remote-left" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
-                        <button class="remote-button" id="full-remote-ok" onclick="sendKey('Select')">OK</button>
-                        <button class="remote-button" id="full-remote-right" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
-                        <button class="remote-button" id="full-remote-down" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
-                    </div>
-                    <div class="button-row">
-                        <button class="remote-button" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
-                        <button class="remote-button" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
-                        <button class="remote-button" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
-                    </div>
-                </div>
+                <button id="launch-remote-btn" class="mode-btn" onclick="openModal('remote-modal')" style="width: 100%; margin-top: 10px;">Launch Remote</button>
              </div>
              <div class="recording-options" id="recording-options" style="display: none;">
                 <div class="form-group">
@@ -225,6 +220,34 @@
                 <span class="close-button" onclick="closeModal('tmdb-results-modal')">&times;</span>
             </div>
             <div class="modal-body" id="tmdb-results-body"></div>
+        </div>
+    </div>
+
+    <div id="remote-modal">
+        <div id="remote-modal-header">
+            <h3><i class="fa-solid fa-satellite-dish"></i> Remote</h3>
+            <span class="close-button" onclick="closeModal('remote-modal')">&times;</span>
+        </div>
+        <div class="remote-container">
+            <div class="remote-grid">
+                <div class="remote-row">
+                    <button class="remote-button-small" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                    <button class="remote-button-small" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
+                    <button class="remote-button-small" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                </div>
+                <div class="d-pad" style="justify-items: center;">
+                    <button class="remote-button-small" style="grid-area: 1 / 2;" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                    <button class="remote-button-small" style="grid-area: 2 / 1;" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button class="remote-button-small" id="modal-remote-ok" style="grid-area: 2 / 2;" onclick="sendKey('Select')">OK</button>
+                    <button class="remote-button-small" style="grid-area: 2 / 3;" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                    <button class="remote-button-small" style="grid-area: 3 / 2;" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+                </div>
+                <div class="remote-row">
+                    <button class="remote-button-small" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
+                    <button class="remote-button-small" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
+                    <button class="remote-button-small" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -508,9 +531,36 @@
             }
         });
 
-        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function openModal(id) { document.getElementById(id).style.display = 'block'; }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
         
+        // Drag-and-drop for the remote modal
+        const remoteModal = document.getElementById('remote-modal');
+        const remoteHeader = document.getElementById('remote-modal-header');
+        let isDragging = false;
+        let offset = [0, 0];
+
+        remoteHeader.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            offset = [
+                remoteModal.offsetLeft - e.clientX,
+                remoteModal.offsetTop - e.clientY
+            ];
+        }, true);
+
+        document.addEventListener('mouseup', function() {
+            isDragging = false;
+        }, true);
+
+        document.addEventListener('mousemove', function(e) {
+            if (isDragging) {
+                e.preventDefault();
+                remoteModal.style.left = (e.clientX + offset[0]) + 'px';
+                remoteModal.style.top = (e.clientY + offset[1]) + 'px';
+            }
+        }, true);
+
+
         document.addEventListener('DOMContentLoaded', () => {
             fetchTunerStatus();
             setMode('watch'); // Set initial mode
