@@ -265,38 +265,50 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     
     title = metadata.get('title', 'On-Demand Recording')
     year = metadata.get('year', '')
+    subtitle = metadata.get('subtitle', '')
+
+    safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
 
     if content_type == 'show':
         try:
             season = int(metadata.get('season', 0))
             episode = int(metadata.get('episode', 0))
-            filename_base = f"{title} - s{season:02d}e{episode:02d}" if season and episode else title
+            
+            show_folder = os.path.join(RECORDINGS_DIR, 'TV Shows', safe_title)
+            season_folder = os.path.join(show_folder, f"Season {season:02d}")
+            os.makedirs(season_folder, exist_ok=True)
+            
+            filename = f"{safe_title} - s{season:02d}e{episode:02d}"
+            if subtitle:
+                safe_subtitle = "".join([c for c in subtitle if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+                filename += f" - {safe_subtitle}"
+            
+            output_path = os.path.join(season_folder, f"{filename}.mkv")
         except (ValueError, TypeError):
-            filename_base = title
-    else:
-        filename_base = f"{title} ({year})" if year else title
-    
-    filename_base = "".join([c for c in filename_base if c.isalpha() or c.isdigit() or c==' ' or c=='-']).rstrip()
-    
-    content_path = os.path.join(RECORDINGS_DIR, 'Movies' if content_type == 'movie' else 'TV Shows')
-    os.makedirs(content_path, exist_ok=True)
-    
-    output_path = os.path.join(content_path, f"{filename_base}.mkv")
+            logging.error(f"Invalid season or episode number for {title}. Saving to default location.")
+            output_path = os.path.join(RECORDINGS_DIR, 'TV Shows', f"{safe_title}.mkv")
+
+    else: # Movie
+        movie_folder = os.path.join(RECORDINGS_DIR, 'Movies', f"{safe_title} ({year})")
+        os.makedirs(movie_folder, exist_ok=True)
+        filename = f"{safe_title} ({year})"
+        output_path = os.path.join(movie_folder, f"{filename}.mkv")
     
     command = [
         'ffmpeg', '-i', encoder_url, '-t', str(duration_seconds),
         '-c', 'copy', '-map', '0', 
-        '-metadata', f"title={metadata.get('title', '')}",
+        '-metadata', f"title={title}",
         '-metadata', f"comment={metadata.get('description', '')}",
         '-f', 'matroska', '-loglevel', 'error', output_path
     ]
 
     try:
+        artwork_path = os.path.join(os.path.dirname(output_path), "poster.jpg")
         if metadata.get('image'):
             try:
                 img_res = requests.get(metadata['image'], timeout=10)
                 img_res.raise_for_status()
-                with open(os.path.join(content_path, f"{filename_base}-poster.jpg"), 'wb') as f:
+                with open(artwork_path, 'wb') as f:
                     f.write(img_res.content)
                 logging.info("[Recording] Artwork downloaded successfully.")
             except Exception as e:
