@@ -59,7 +59,6 @@ ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00' + b'\xff' * 175
 TMDB_API_KEY = ''
-CHANNELS_DVR_IP = ''
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
@@ -81,13 +80,13 @@ executor = ThreadPoolExecutor(max_workers=10)
 # --- Core Application Logic ---
 
 def load_config():
-    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY, CHANNELS_DVR_IP
+    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY
     if not os.path.exists(CONFIG_FILE_PATH):
         logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating default.")
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": ""}, f, indent=2)
+                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""}, f, indent=2)
         except Exception as e:
             logging.error(f"Could not create default config: {e}")
     try:
@@ -100,11 +99,9 @@ def load_config():
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
         ONDEMAND_SETTINGS = config_data.get('ondemand_settings', {})
         TMDB_API_KEY = config_data.get('tmdb_api_key', '')
-        CHANNELS_DVR_IP = config_data.get('channels_dvr_ip', '')
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
         if TMDB_API_KEY: logging.info("TMDb API Key is configured.")
-        if CHANNELS_DVR_IP: logging.info(f"Channels DVR IP is configured: {CHANNELS_DVR_IP}")
 
     except Exception as e:
         logging.error(f"Error loading config: {e}")
@@ -470,7 +467,7 @@ def api_config():
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
             return jsonify(config_data)
         except FileNotFoundError:
-            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": "" })
+            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""})
         except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])
