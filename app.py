@@ -59,6 +59,7 @@ ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00' + b'\xff' * 175
 TMDB_API_KEY = ''
+CHANNELS_DVR_IP = ''
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
@@ -80,44 +81,17 @@ executor = ThreadPoolExecutor(max_workers=10)
 # --- Core Application Logic ---
 
 def load_config():
-    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY
-    
-    # Define the default structure of the config file
-    DEFAULT_CONFIG = {
-        "tuners": [], 
-        "channels": [], 
-        "epg_channels": [], 
-        "ondemand_apps": [], 
-        "ondemand_settings": {}, 
-        "tmdb_api_key": ""
-    }
-
+    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY, CHANNELS_DVR_IP
     if not os.path.exists(CONFIG_FILE_PATH):
         logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Creating default.")
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump(DEFAULT_CONFIG, f, indent=2)
+                json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": ""}, f, indent=2)
         except Exception as e:
             logging.error(f"Could not create default config: {e}")
-
     try:
-        with open(CONFIG_FILE_PATH, 'r') as f:
-            config_data = json.load(f) or {}
-
-        # Check for missing keys and add them with default values
-        config_updated = False
-        for key, default_value in DEFAULT_CONFIG.items():
-            if key not in config_data:
-                config_data[key] = default_value
-                config_updated = True
-                logging.info(f"Adding missing config key '{key}' with default value.")
-
-        # If the config was updated, write it back to the file
-        if config_updated:
-            with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump(config_data, f, indent=2)
-
+        with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f) or {}
         TUNERS = sorted(config_data.get('tuners', []), key=lambda x: x.get('priority', 99))
         for tuner in TUNERS:
             tuner['in_use'] = False
@@ -126,11 +100,11 @@ def load_config():
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
         ONDEMAND_SETTINGS = config_data.get('ondemand_settings', {})
         TMDB_API_KEY = config_data.get('tmdb_api_key', '')
-        
+        CHANNELS_DVR_IP = config_data.get('channels_dvr_ip', '')
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
-        if TMDB_API_KEY: 
-            logging.info("TMDb API Key is configured.")
+        if TMDB_API_KEY: logging.info("TMDb API Key is configured.")
+        if CHANNELS_DVR_IP: logging.info(f"Channels DVR IP is configured: {CHANNELS_DVR_IP}")
 
     except Exception as e:
         logging.error(f"Error loading config: {e}")
@@ -152,26 +126,21 @@ def release_tuner(tuner_ip):
         stop_event.set()
         thread.join(timeout=5)
     
-    was_in_preview = False
     with SESSION_LOCK:
         if tuner_ip in PREVIEW_SESSIONS:
-            was_in_preview = True
             del PREVIEW_SESSIONS[tuner_ip]
             logging.info(f"Cleared preview session for tuner {tuner_ip}")
 
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
-                if tuner.get('in_use') or was_in_preview:
+                if tuner.get('in_use'):
                     tuner['in_use'] = False
-                    logging.info(f"Released tuner: {tuner.get('name')}. Sending Home keypress.")
+                    if DEBUG_LOGGING_ENABLED: logging.info(f"Released tuner: {tuner.get('name')}")
                     try:
-                        # Send Home keypress multiple times for reliability
-                        for _ in range(3):
-                            roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
-                            time.sleep(0.2)
-                    except requests.exceptions.RequestException as e:
-                        logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
+                        roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
+                    except requests.exceptions.RequestException:
+                        pass
                 break
 
 def send_key_sequence(device_ip, keys):
@@ -260,16 +229,6 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-def download_artwork(url, path):
-    try:
-        img_res = requests.get(url, timeout=10)
-        img_res.raise_for_status()
-        with open(path, 'wb') as f:
-            f.write(img_res.content)
-        logging.info("[Recording] Artwork downloaded successfully.")
-    except Exception as e:
-        logging.error(f"[Recording] Failed to download artwork: {e}")
-
 def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
     if not tuner:
@@ -281,33 +240,15 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     
     title = metadata.get('title', 'On-Demand Recording')
     year = metadata.get('year', '')
+    filename_base = f"{title} ({year})" if year else title
     
-    # Sanitize title
-    safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
-
-    if content_type == 'movie':
-        filename = f"{safe_title} ({year}).mkv" if year else f"{safe_title}.mkv"
-        content_path = os.path.join(RECORDINGS_DIR, 'Movies')
-        os.makedirs(content_path, exist_ok=True)
-        output_path = os.path.join(content_path, filename)
-        artwork_path = os.path.join(content_path, f"{safe_title}-poster.jpg")
+    filename_base = "".join([c for c in filename_base if c.isalpha() or c.isdigit() or c==' ']).rstrip()
     
-    elif content_type == 'show':
-        season_num = metadata.get('season_number', '01')
-        episode_num = metadata.get('episode_number', '01')
-        episode_title = metadata.get('subtitle', 'Episode ' + episode_num)
-        safe_episode_title = "".join([c for c in episode_title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
-
-        filename = f"{safe_title} - S{season_num.zfill(2)}E{episode_num.zfill(2)} - {safe_episode_title}.mkv"
-        content_path = os.path.join(RECORDINGS_DIR, 'TV Shows', safe_title, f"Season {season_num.zfill(2)}")
-        os.makedirs(content_path, exist_ok=True)
-        output_path = os.path.join(content_path, filename)
-        artwork_path = os.path.join(content_path, f"{safe_title}-poster.jpg")
-
-    else:
-        logging.error(f"[Recording] Invalid content type: {content_type}")
-        return
-
+    content_path = os.path.join(RECORDINGS_DIR, 'Movies' if content_type == 'movie' else 'TV Shows')
+    os.makedirs(content_path, exist_ok=True)
+    
+    output_path = os.path.join(content_path, f"{filename_base}.mkv")
+    
     command = [
         'ffmpeg', '-i', encoder_url, '-t', str(duration_seconds),
         '-c', 'copy', '-map', '0', 
@@ -317,27 +258,24 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     ]
 
     try:
-        # Submit artwork download to thread pool so it doesn't block the main thread
         if metadata.get('image'):
-            executor.submit(download_artwork, metadata['image'], artwork_path)
+            try:
+                img_res = requests.get(metadata['image'], timeout=10)
+                img_res.raise_for_status()
+                with open(os.path.join(content_path, f"{filename_base}-poster.jpg"), 'wb') as f:
+                    f.write(img_res.content)
+                logging.info("[Recording] Artwork downloaded successfully.")
+            except Exception as e:
+                logging.error(f"[Recording] Failed to download artwork: {e}")
 
         process = subprocess.Popen(command)
         RECORDING_PROCESSES[tuner_ip] = process
         logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
         
-        with SESSION_LOCK:
-            if tuner_ip in PREVIEW_SESSIONS:
-                PREVIEW_SESSIONS[tuner_ip]['recording_start_time'] = time.time()
-                PREVIEW_SESSIONS[tuner_ip]['recording_duration'] = duration_seconds
-        
         threading.Timer(duration_seconds + 5, release_tuner, args=[tuner_ip]).start()
         
     except Exception as e:
-        logging.error(f"[Recording] Failed to start FFMPEG process: {e}")
-        # If ffmpeg fails, revert the recording state
-        with SESSION_LOCK:
-            if tuner_ip in PREVIEW_SESSIONS:
-                PREVIEW_SESSIONS[tuner_ip]['is_recording_queued'] = False
+        logging.error(f"[Recording] Failed to start local recording: {e}")
 
 def start_preview_session(tuner_ip):
     with TUNER_LOCK:
@@ -363,21 +301,16 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, co
             return {"status": "error", "message": "No active preview session."}
         
         session = PREVIEW_SESSIONS[tuner_ip]
+        session['committed'] = True
         tuner_name = session['tuner']['name']
         
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for local recording.")
-            # Set the recording state *before* starting the process to ensure a fast UI update
-            session['committed'] = True
-            session['is_recording_queued'] = True
-            
-            # Now start the potentially long-running process
             start_local_recording(tuner_ip, duration, metadata, content_type)
-            
+            session['is_recording_queued'] = True
             return {"status": "success", "message": "Local recording started."}
         else:
             logging.info(f"Committed session for tuner {tuner_name} for live viewing.")
-            session['committed'] = True
             return {"status": "success", "message": "Stream is now ready for Channels DVR."}
 
 @app.route('/stream/<channel_id>')
@@ -424,43 +357,16 @@ def stream_ondemand():
 
 def generate_m3u_from_channels(channel_list, playlist_filter=None):
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
-    filtered_list = channel_list
-    if playlist_filter:
-        filtered_list = [ch for ch in channel_list if ch.get('playlist') == playlist_filter]
-        logging.info(f"Filtering M3U for playlist='{playlist_filter}'. Found {len(filtered_list)} matching channels.")
+    filtered_list = [ch for ch in channel_list if not playlist_filter or ch.get('playlist') == playlist_filter]
     for channel in filtered_list:
         stream_url = f"http://{request.host}/stream/{channel['id']}"
         extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
-        
-        tags = {
-            "tvg-name": "name",
-            "channel-number": "channel-number",
-            "tvg-logo": "tvg-logo",
-            "tvc-guide-stationid": "tvc_guide_stationid",
-            "tvc-guide-art": "tvc-guide-art",
-            "tvc-guide-title": "tvc-guide-title",
-            "tvc-guide-description": "tvc-guide-description",
-            "tvc-guide-tags": "tvc-guide-tags",
-            "tvc-guide-genres": "tvc-guide-genres",
-            "tvc-guide-categories": "tvc-guide-categories",
-            "tvc-guide-placeholders": "tvc-guide-placeholders",
-            "tvc-stream-vcodec": "tvc-stream-vcodec",
-            "tvc-stream-acodec": "tvc-stream-acodec"
-        }
-
+        tags = {"tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo", "tvc-guide-stationid": "tvc_guide_stationid"}
         for tag, key in tags.items():
-            if key in channel and channel[key]:
-                if isinstance(channel[key], list):
-                    extinf_line += f' {tag}="{",".join(map(str, channel[key]))}"'
-                else:
-                    extinf_line += f' {tag}="{channel[key]}"'
-
-        if 'playlist' in channel and channel['playlist']:
-            extinf_line += f' group-title="{channel["playlist"]}"'
-            
+            if key in channel: extinf_line += f' {tag}="{channel[key]}"'
+        if 'playlist' in channel and channel['playlist']: extinf_line += f' group-title="{channel["playlist"]}"'
         extinf_line += f',{channel["name"]}'
         m3u_content.extend([extinf_line, stream_url])
-        
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
 @app.route('/channels.m3u')
@@ -533,7 +439,7 @@ def api_config():
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
             return jsonify(config_data)
         except FileNotFoundError:
-            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "" })
+            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "channels_dvr_ip": "" })
         except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])
@@ -608,28 +514,22 @@ def api_plugins():
 def api_pretune_status():
     with SESSION_LOCK:
         active_preview_ips = set(PREVIEW_SESSIONS.keys())
-        preview_sessions_copy = dict(PREVIEW_SESSIONS)
     status = []
     with TUNER_LOCK:
         for tuner in TUNERS:
             tuner_status = "available"
-            recording_end_time = None
             if tuner.get('in_use'):
                 tuner_status = "in-use"
             elif tuner['roku_ip'] in active_preview_ips:
-                 session = preview_sessions_copy.get(tuner['roku_ip'])
-                 if session:
-                    if session.get('is_recording_queued'):
-                        tuner_status = "recording"
-                        if 'recording_start_time' in session and 'recording_duration' in session:
-                            recording_end_time = session['recording_start_time'] + session['recording_duration']
-                    else:
-                        tuner_status = "pre-tuning"
+                 session = PREVIEW_SESSIONS[tuner['roku_ip']]
+                 if session.get('is_recording_queued'):
+                     tuner_status = "recording"
+                 else:
+                     tuner_status = "pre-tuning"
             status.append({
                 "name": tuner.get("name", tuner['roku_ip']),
                 "roku_ip": tuner['roku_ip'],
-                "status": tuner_status,
-                "recording_end_time": recording_end_time
+                "status": tuner_status
             })
     return jsonify(status)
 
@@ -658,18 +558,6 @@ def api_pretune_commit():
     result = commit_preview_session(tuner_ip, record, duration, metadata, content_type)
     return jsonify(result), 200 if result['status'] == 'success' else 409
     
-@app.route('/api/release_all_tuners', methods=['POST'])
-def api_release_all_tuners():
-    try:
-        with TUNER_LOCK:
-            for tuner in TUNERS:
-                if tuner.get('in_use') or tuner.get('roku_ip') in PREVIEW_SESSIONS:
-                    release_tuner(tuner.get('roku_ip'))
-        return jsonify({"status": "success", "message": "All tuners have been released."})
-    except Exception as e:
-        logging.error(f"Error releasing all tuners: {e}")
-        return jsonify({"status": "error", "message": "An error occurred while releasing tuners."}), 500
-
 @app.route('/api/pretune/fetch_info', methods=['POST'])
 def api_fetch_info():
     tuner_ip = request.json.get('tuner_ip')
