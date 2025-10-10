@@ -47,6 +47,7 @@ logging.basicConfig(level=logging.INFO, format=log_format)
 root_logger = logging.getLogger()
 deque_handler = DequeLogHandler(log_buffer)
 formatter = logging.Formatter(log_format)
+deque_handler.setFormatter(formatter)
 root_logger.addHandler(deque_handler)
 
 # --- Environment & Global Variables ---
