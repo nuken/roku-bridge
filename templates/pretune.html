@@ -144,7 +144,7 @@
              <div class="recording-options" id="recording-options" style="display: none;">
                 <div class="form-group">
                     <label for="content-type-select">Content Type</label>
-                    <select id="content-type-select">
+                    <select id="content-type-select" onchange="toggleTvShowFields()">
                         <option value="movie">Movie</option>
                         <option value="show">TV Show</option>
                     </select>
@@ -157,6 +157,18 @@
                     <div class="form-group">
                         <label for="title-input">Title</label>
                         <input type="text" id="title-input" placeholder="Enter title to search online">
+                    </div>
+                    <div class="form-group" id="season-episode-fields" style="display: none;">
+                        <div style="display: flex; gap: 10px;">
+                            <div style="flex-grow: 1;">
+                                <label for="season-input">Season</label>
+                                <input type="number" id="season-input" min="1">
+                            </div>
+                            <div style="flex-grow: 1;">
+                                <label for="episode-input">Episode</label>
+                                <input type="number" id="episode-input" min="1">
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="duration-input">Duration (minutes)</label>
@@ -229,6 +241,12 @@
             document.getElementById('record-mode-btn').classList.toggle('active', mode === 'record');
             recordingOptions.style.display = mode === 'record' ? 'block' : 'none';
             document.getElementById('start-stream').textContent = mode === 'record' ? 'Start Local Recording' : 'Send to Channels DVR';
+        }
+
+        function toggleTvShowFields() {
+            const contentType = document.getElementById('content-type-select').value;
+            const tvFields = document.getElementById('season-episode-fields');
+            tvFields.style.display = contentType === 'show' ? 'block' : 'none';
         }
 
         function showNotification(message, type = 'success') {
@@ -445,7 +463,9 @@
                 title: document.getElementById('title-input').value,
                 subtitle: document.getElementById('subtitle-input').value,
                 description: document.getElementById('description-input').value,
-                image: document.getElementById('image-input').value
+                image: document.getElementById('image-input').value,
+                season: document.getElementById('season-input').value,
+                episode: document.getElementById('episode-input').value
             };
             const contentType = document.getElementById('content-type-select').value;
 
