@@ -162,11 +162,11 @@
                         <div style="display: flex; gap: 10px;">
                             <div style="flex-grow: 1;">
                                 <label for="season-input">Season</label>
-                                <input type="number" id="season-input" min="1">
+                                <input type="number" id="season-input" min="1" value="1">
                             </div>
                             <div style="flex-grow: 1;">
                                 <label for="episode-input">Episode</label>
-                                <input type="number" id="episode-input" min="1">
+                                <input type="number" id="episode-input" min="1" value="1">
                             </div>
                         </div>
                     </div>
@@ -246,7 +246,19 @@
         function toggleTvShowFields() {
             const contentType = document.getElementById('content-type-select').value;
             const tvFields = document.getElementById('season-episode-fields');
-            tvFields.style.display = contentType === 'show' ? 'block' : 'none';
+            const durationInput = document.getElementById('duration-input');
+            const seasonInput = document.getElementById('season-input');
+            const episodeInput = document.getElementById('episode-input');
+
+            if (contentType === 'show') {
+                tvFields.style.display = 'block';
+                durationInput.value = 30;
+                seasonInput.value = 1;
+                episodeInput.value = 1;
+            } else {
+                tvFields.style.display = 'none';
+                durationInput.value = 120;
+            }
         }
 
         function showNotification(message, type = 'success') {
