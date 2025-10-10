@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Roku Pre-Tuning</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #2c2c2c; --surface-color: #3a3a3a; --primary-color: #7dd3fc;
+            --text-color: #e0e0e0; --border-color: #4a4a4a; --button-color: #555;
+            --success-color: #28a745; --error-color: #dc3545; --warn-color: #ffc107;
+            --available-color: #28a745; --in-use-color: #ffc107; --pre-tuning-color: #007bff;
+            --recording-color: #9d31cc;
+        }
+        html, body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color); color: var(--text-color);
+            margin: 0; padding: 0; height: 100%; overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .pretune-container { display: flex; flex-direction: column; width: 100%; height: 100%; }
+        .video-wrapper { position: relative; width: 100%; flex-grow: 1; background-color: #000; }
+        video { width: 100%; height: 100%; object-fit: contain; }
+        .controls-wrapper { background-color: var(--surface-color); padding: 15px; box-sizing: border-box; overflow-y: auto; }
+        .mode-selector { display: flex; gap: 10px; margin-bottom: 20px; }
+        .mode-btn { flex-grow: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background-color: var(--button-color); color: var(--text-color); font-size: 1em; cursor: pointer; }
+        .mode-btn.active { background-color: var(--primary-color); color: var(--bg-color); border-color: var(--primary-color); }
+        .app-launcher select { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #555; background-color: var(--border-color); color: var(--text-color); font-size: 1em; margin-bottom: 15px; -webkit-appearance: none; appearance: none; }
+        #start-stream, #stop-session { width: 100%; padding: 15px; border-radius: 12px; border: none; font-size: 1.2em; color: white; cursor: pointer; margin-top: 10px; }
+        #start-stream { background-color: var(--success-color); }
+        #stop-session { background-color: var(--error-color); }
+        .recording-options { background-color: var(--border-color); padding: 15px; border-radius: 12px; margin-top: 15px; }
+        .form-group { margin-bottom: 10px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background-color: var(--bg-color); color: var(--text-color); font-size: 1em; box-sizing: border-box; }
+        .fetch-buttons { display: flex; gap: 10px; margin-bottom: 15px; }
+        .fetch-button { flex-grow: 1; padding: 10px; border-radius: 8px; border: none; font-size: 0.9em; color: white; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+        #fetch-roku-btn { background-color: #6f42c1; }
+        #search-tmdb-btn { background-color: #0d6efd; }
+        .remote-button { background-color: var(--button-color); color: #fff; border: none; border-radius: 50%; width: 60px; height: 60px; font-size: 1.5em; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: background-color 0.2s, transform 0.1s; }
+        .remote-button:active { transform: scale(0.95); background-color: #777; }
+        .remote-overlay { position: absolute; bottom: 0; left: 0; right: 0; padding: 15px; background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0)); display: grid; grid-template-areas: ". up ." "left ok right" ". down ."; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 10px; justify-items: center; align-items: center; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        #button-up-overlay { grid-area: up; }
+        #button-left-overlay { grid-area: left; }
+        #button-ok-overlay { grid-area: ok; }
+        #button-right-overlay { grid-area: right; }
+        #button-down-overlay { grid-area: down; }
+        #button-back-overlay { position: absolute; top: 20px; left: 20px; }
+        .video-wrapper:hover .remote-overlay, .remote-overlay.active { opacity: 1; pointer-events: auto; }
+        .notification { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: 8px; z-index: 1001; color: white; opacity: 0; transition: opacity 0.5s, top 0.5s; }
+        .notification.show { opacity: 1; top: 30px; }
+        .tuner-list { list-style: none; padding: 0; margin: 0 0 20px 0; }
+        .tuner-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 8px; margin-bottom: 8px; background-color: var(--border-color); }
+        .tuner-item .status { font-weight: bold; padding: 4px 8px; border-radius: 5px; font-size: 0.9em; }
+        .tuner-item .status.available { color: var(--available-color); }
+        .tuner-item .status.in-use { color: var(--in-use-color); }
+        .tuner-item .status.pre-tuning { color: var(--pre-tuning-color); }
+        .tuner-item .status.recording { color: var(--recording-color); }
+        .tuner-item button { padding: 8px 12px; border: none; border-radius: 6px; color: white; cursor: pointer; }
+        .tuner-item button.start { background-color: var(--available-color); }
+        .tuner-item button.takeover { background-color: var(--warn-color); }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); align-items: center; justify-content: center; }
+        .modal-content { background-color: var(--surface-color); padding: 25px; border-radius: 12px; width: 90%; max-width: 500px; text-align: center; display: flex; flex-direction: column; max-height: 80vh; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; margin-bottom: 15px; border-bottom: 1px solid var(--border-color); }
+        .modal-header h3 { margin: 0; color: var(--primary-color); }
+        .close-button { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .modal-body { overflow-y: auto; text-align: left; }
+        .search-result { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid var(--border-color); cursor: pointer; }
+        .search-result:hover { background-color: #444; }
+        .search-result img { width: 40px; height: 60px; object-fit: cover; border-radius: 4px; margin-right: 15px; background-color: #222; }
+        .search-result-info { display: flex; flex-direction: column; }
+        .search-result-info span { font-size: 0.9em; color: #ccc; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .modal-button { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; }
+        .modal-button.cancel { background-color: #6c757d; color: white; }
+        .modal-button.confirm { background-color: var(--warn-color); color: #111; }
+
+        /* Floating Remote Styles */
+        #remote-modal {
+            display: none; position: fixed; z-index: 1002; left: 50px; top: 50px;
+            background-color: var(--surface-color); border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4); width: auto;
+        }
+        #remote-modal-header {
+            padding: 10px; cursor: move; background-color: var(--border-color);
+            border-top-left-radius: 20px; border-top-right-radius: 20px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        #remote-modal-header h3 { margin: 0; font-size: 1em; color: var(--primary-color); }
+        .remote-container { padding: 15px; }
+        .remote-grid { display: grid; gap: 10px; }
+        .remote-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; justify-items: center; }
+        .d-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 10px; }
+        .d-pad .remote-button { border-radius: 10px; }
+        .remote-button-small {
+            background-color: #555; color: #fff; border: none; border-radius: 50%;
+            width: 50px; height: 50px; font-size: 1.2em; cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .remote-button-small:active { background-color: #777; transform: scale(0.95); }
+        #modal-remote-ok { background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; }
+        .keyboard-section { display: flex; gap: 10px; margin-top: 10px; }
+        .keyboard-section input[type="text"] {
+            flex-grow: 1; padding: 10px; border-radius: 8px; border: 1px solid #555;
+            background-color: var(--bg-color); color: var(--text-color); font-size: 1em; min-width: 0;
+        }
+        .keyboard-section button {
+            padding: 10px; border-radius: 8px; border: none;
+            background-color: var(--primary-color); color: var(--bg-color); font-size: 1em;
+            cursor: pointer; transition: background-color 0.2s;
+        }
+
+        @media (min-width: 769px) {
+            .pretune-container { flex-direction: row; }
+            .controls-wrapper { width: 30%; max-width: 400px; }
+            .video-wrapper { width: 70%; }
+            .remote-overlay { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="pretune-container">
+        <div class="controls-wrapper">
+             <h1><i class="fa-solid fa-satellite-dish"></i> Pre-Tune Control</h1>
+
+             <div class="mode-selector">
+                <button id="watch-mode-btn" class="mode-btn active" onclick="setMode('watch')">Watch</button>
+                <button id="record-mode-btn" class="mode-btn" onclick="setMode('record')">Record</button>
+             </div>
+             
+             <div id="tuner-list-container">
+                <h3>Select a Tuner</h3>
+                <div id="tuner-list"></div>
+             </div>
+             <hr style="border-color: var(--border-color); margin: 20px 0;">
+             <div class="app-launcher">
+                <select id="app-launcher" onchange="launchApp()">
+                    <option value="">-- Launch an App --</option>
+                    {% for app in ondemand_apps %}
+                        <option value="{{ app.roku_app_id }}">{{ app.name }}</option>
+                    {% endfor %}
+                </select>
+                <button id="launch-remote-btn" class="mode-btn" onclick="openModal('remote-modal')" style="width: 100%; margin-top: 10px;">Launch Remote</button>
+             </div>
+             <div class="recording-options" id="recording-options" style="display: none;">
+                <div class="form-group">
+                    <label for="content-type-select">Content Type</label>
+                    <select id="content-type-select" onchange="toggleTvShowFields()">
+                        <option value="movie">Movie</option>
+                        <option value="show">TV Show</option>
+                    </select>
+                </div>
+                <div id="metadata-group">
+                    <div class="fetch-buttons">
+                        <button class="fetch-button" id="fetch-roku-btn" onclick="fetchRokuInfo()"><i class="fa-brands fa-adn"></i> Fetch from Roku</button>
+                        <button class="fetch-button" id="search-tmdb-btn" onclick="searchTmdb()"><i class="fa-solid fa-film"></i> Search Online</button>
+                    </div>
+                    <div class="form-group">
+                        <label for="title-input">Title</label>
+                        <input type="text" id="title-input" placeholder="Enter title to search online">
+                    </div>
+                    <input type="hidden" id="year-input">
+                    <div class="form-group" id="season-episode-fields" style="display: none;">
+                        <div style="display: flex; gap: 10px;">
+                            <div style="flex-grow: 1;">
+                                <label for="season-input">Season</label>
+                                <input type="number" id="season-input" min="1" value="1">
+                            </div>
+                            <div style="flex-grow: 1;">
+                                <label for="episode-input">Episode</label>
+                                <input type="number" id="episode-input" min="1" value="1">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="duration-input">Duration (minutes)</label>
+                        <input type="number" id="duration-input" value="120" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="padding-input">Padding (minutes)</label>
+                        <input type="number" id="padding-input" value="10" min="0">
+                    </div>
+                     <div class="form-group">
+                        <label for="subtitle-input">Subtitle / Episode (Optional)</label>
+                        <input type="text" id="subtitle-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="description-input">Description (Optional)</label>
+                        <textarea id="description-input" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="image-input">Image URL (Optional)</label>
+                        <input type="text" id="image-input" placeholder="Auto-filled by search">
+                    </div>
+                </div>
+             </div>
+             <button id="start-stream" onclick="startStream()">Send to Channels</button>
+             <button id="stop-session" onclick="stopSession()">Stop Session & Release Tuner</button>
+        </div>
+        <div class="video-wrapper">
+            <video id="video-player" autoplay muted playsinline></video>
+            <div class="remote-overlay">
+                 <button class="remote-button" id="button-back-overlay" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                 <button class="remote-button" id="button-up-overlay" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                 <button class="remote-button" id="button-left-overlay" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                 <button class="remote-button" id="button-ok-overlay" onclick="sendKey('Select')">OK</button>
+                 <button class="remote-button" id="button-right-overlay" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                 <button class="remote-button" id="button-down-overlay" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="takeover-modal" class="modal">
+        <div class="modal-content">
+            <h3>Confirm Takeover</h3>
+            <p>This tuner is already in a session. Do you want to end that session and start a new one?</p>
+            <div class="modal-footer">
+                <button class="modal-button cancel" onclick="closeModal('takeover-modal')">Cancel</button>
+                <button class="modal-button confirm" id="confirm-takeover-btn">Takeover</button>
+            </div>
+        </div>
+    </div>
+    <div id="tmdb-results-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Search Results</h3>
+                <span class="close-button" onclick="closeModal('tmdb-results-modal')">&times;</span>
+            </div>
+            <div class="modal-body" id="tmdb-results-body"></div>
+        </div>
+    </div>
+
+    <div id="remote-modal">
+        <div id="remote-modal-header">
+            <h3><i class="fa-solid fa-satellite-dish"></i> Remote</h3>
+            <span class="close-button" onclick="closeModal('remote-modal')">&times;</span>
+        </div>
+        <div class="remote-container">
+            <div class="remote-grid">
+                <div class="remote-row">
+                    <button class="remote-button-small" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                    <button class="remote-button-small" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
+                    <button class="remote-button-small" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                </div>
+                <div class="d-pad" style="justify-items: center;">
+                    <button class="remote-button-small" style="grid-area: 1 / 2;" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                    <button class="remote-button-small" style="grid-area: 2 / 1;" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button class="remote-button-small" id="modal-remote-ok" style="grid-area: 2 / 2;" onclick="sendKey('Select')">OK</button>
+                    <button class="remote-button-small" style="grid-area: 2 / 3;" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                    <button class="remote-button-small" style="grid-area: 3 / 2;" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+                </div>
+                <div class="remote-row">
+                    <button class="remote-button-small" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
+                    <button class="remote-button-small" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
+                    <button class="remote-button-small" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
+                </div>
+                <div class="keyboard-section">
+                    <input type="text" id="remote-keyboard-input" placeholder="Type here...">
+                    <button onclick="sendRemoteText()"><i class="fa-solid fa-paper-plane"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('video-player');
+        const remoteOverlay = document.querySelector('.remote-overlay');
+        const recordingOptions = document.getElementById('recording-options');
+        let player, activeTunerIp = null;
+        let currentMode = 'watch';
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('watch-mode-btn').classList.toggle('active', mode === 'watch');
+            document.getElementById('record-mode-btn').classList.toggle('active', mode === 'record');
+            recordingOptions.style.display = mode === 'record' ? 'block' : 'none';
+            document.getElementById('start-stream').textContent = mode === 'record' ? 'Start Local Recording' : 'Send to Channels DVR';
+        }
+
+        function toggleTvShowFields() {
+            const contentType = document.getElementById('content-type-select').value;
+            const tvFields = document.getElementById('season-episode-fields');
+            const durationInput = document.getElementById('duration-input');
+            const seasonInput = document.getElementById('season-input');
+            const episodeInput = document.getElementById('episode-input');
+
+            if (contentType === 'show') {
+                tvFields.style.display = 'block';
+                durationInput.value = 30;
+                seasonInput.value = 1;
+                episodeInput.value = 1;
+            } else {
+                tvFields.style.display = 'none';
+                durationInput.value = 120;
+            }
+        }
+
+        function showNotification(message, type = 'success') {
+            const n = document.createElement('div');
+            n.className = `notification`;
+            const color = type === 'error' ? 'var(--error-color)' : (type === 'warn' ? 'var(--warn-color)' : 'var(--success-color)');
+            n.style.backgroundColor = color;
+            n.textContent = message; document.body.appendChild(n);
+            setTimeout(() => n.classList.add('show'), 10);
+            setTimeout(() => { n.classList.remove('show'); n.addEventListener('transitionend', () => n.remove()); }, 4000);
+        }
+
+        function cleanupPlayer() {
+            if (player) {
+                player.unload();
+                player.detachMediaElement();
+                player.destroy();
+                player = null;
+            }
+            videoElement.src = "";
+        }
+
+        async function fetchTunerStatus() {
+            try {
+                const response = await fetch(window.location.origin + '/api/pretune/status');
+                const tuners = await response.json();
+                renderTunerList(tuners);
+            } catch (error) {
+                console.error("Failed to fetch tuner status:", error);
+                document.getElementById('tuner-list').innerHTML = '<p style="color: var(--error-color);">Error loading tuners.</p>';
+            }
+        }
+        
+        function renderTunerList(tuners) {
+            const listEl = document.getElementById('tuner-list');
+            if (!tuners || tuners.length === 0) {
+                listEl.innerHTML = "<p>No tuners configured.</p>";
+                return;
+            }
+            listEl.innerHTML = tuners.map(tuner => `
+                <div class="tuner-item">
+                    <span>${tuner.name}</span>
+                    <span class="status ${tuner.status}">${tuner.status.replace('-', ' ')}</span>
+                    ${tuner.status === 'available' ? `<button class="start" onclick="handleSessionStart('${tuner.roku_ip}', false)">Start</button>` : ''}
+                    ${(tuner.status !== 'available' && tuner.status !== 'in-use') ? `<button class="takeover" onclick="handleSessionStart('${tuner.roku_ip}', true)">Takeover</button>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function handleSessionStart(tunerIp, isTakeover) {
+            if (isTakeover) {
+                const modal = document.getElementById('takeover-modal');
+                modal.style.display = 'flex';
+                const confirmBtn = document.getElementById('confirm-takeover-btn');
+                confirmBtn.onclick = () => {
+                    closeModal('takeover-modal');
+                    startSession(tunerIp, true);
+                };
+            } else {
+                startSession(tunerIp, false);
+            }
+        }
+
+        async function startSession(tunerIp, isTakeover) {
+            if (activeTunerIp && activeTunerIp !== tunerIp) { await stopSession(); }
+            if(isTakeover) { await stopSession(tunerIp, true); }
+
+            cleanupPlayer();
+            try {
+                const response = await fetch('/api/pretune/start', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tuner_ip: tunerIp })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    activeTunerIp = data.roku_ip;
+                    const streamUrl = `/api/pretune/stream?tuner_ip=${data.roku_ip}`;
+                    if (mpegts.isSupported()) {
+                        player = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: streamUrl });
+                        player.attachMediaElement(videoElement);
+                        player.load();
+                        player.play();
+                    }
+                    showNotification(`Session started on tuner: ${data.tuner_name}`);
+                } else { throw new Error(data.message || 'Unknown error'); }
+            } catch (error) { showNotification(`Error starting session: ${error.message}`, 'error'); }
+            fetchTunerStatus();
+        }
+        
+        async function stopSession(tunerToStop = null, silent = false) {
+            const tunerIp = tunerToStop || activeTunerIp;
+            if (!tunerIp) { return; }
+            if (!tunerToStop) {
+                 cleanupPlayer();
+                 activeTunerIp = null;
+                 document.getElementById('app-launcher').value = '';
+                 document.getElementById('title-input').value = '';
+                 document.getElementById('subtitle-input').value = '';
+                 document.getElementById('description-input').value = '';
+                 document.getElementById('image-input').value = '';
+            }
+            try {
+                await fetch('/api/pretune/stop', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tuner_ip: tunerIp })
+                });
+                if(!silent) showNotification('Session stopped and tuner released.', 'success');
+            } catch(error) {
+                if(!silent) showNotification('Failed to stop session.', 'error');
+            }
+            fetchTunerStatus();
+        }
+
+        async function launchApp() {
+            if (!activeTunerIp) { showNotification('Please start a session on a tuner first.', 'warn'); return; }
+            const appId = document.getElementById('app-launcher').value;
+            if (!appId) return;
+            try { await fetch(`/remote/launch/${activeTunerIp}/${appId}`, { method: 'POST' }); }
+            catch (error) { showNotification('Failed to launch app.', 'error'); }
+        }
+
+        async function sendKey(key) {
+            if (!activeTunerIp) { return; }
+            try { await fetch(`/remote/keypress/${activeTunerIp}/${encodeURIComponent(key)}`, { method: 'POST' }); }
+            catch (error) { console.error(`Failed to send key ${key}:`, error); }
+        }
+
+        async function sendRemoteText() {
+            const textInput = document.getElementById('remote-keyboard-input');
+            const text = textInput.value;
+            if (!text) return;
+            if (!activeTunerIp) {
+                showNotification('Please start a session first.');
+                return;
+            }
+            
+            for (const char of text) {
+                await sendKey(`Lit_${encodeURIComponent(char)}`);
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+            }
+            
+            textInput.value = '';
+        }
+        
+        async function fetchRokuInfo() {
+             if (!activeTunerIp) { showNotification('Please start a session first.', 'error'); return; }
+             try {
+                const response = await fetch('/api/pretune/fetch_info', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ tuner_ip: activeTunerIp })
+                });
+                const data = await response.json();
+                if (data.status === 'success' && data.metadata) {
+                    if(data.metadata.title) document.getElementById('title-input').value = data.metadata.title;
+                    if(data.metadata.subtitle) document.getElementById('subtitle-input').value = data.metadata.subtitle;
+                    if(data.metadata.duration) document.getElementById('duration-input').value = data.metadata.duration;
+                    showNotification('Metadata fetched successfully!', 'success');
+                } else if (data.status === 'nodata') {
+                    showNotification('No metadata available from this app. Please enter manually.', 'warn');
+                } else { throw new Error(data.message || 'Failed to fetch info.'); }
+             } catch (error) { showNotification(`Error fetching info: ${error.message}`, 'error'); }
+        }
+
+        async function searchTmdb() {
+            const query = document.getElementById('title-input').value;
+            if (!query) { showNotification('Please enter a title to search.', 'warn'); return; }
+            
+            try {
+                const response = await fetch('/api/metadata/search', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ query: query, type: 'multi' })
+                });
+                const data = await response.json();
+                if (data.status === 'error') throw new Error(data.message);
+                
+                const resultsBody = document.getElementById('tmdb-results-body');
+                resultsBody.innerHTML = '';
+                if (data.results && data.results.length > 0) {
+                    data.results.forEach(item => {
+                        const resultDiv = document.createElement('div');
+                        resultDiv.className = 'search-result';
+                        resultDiv.onclick = () => {
+                            document.getElementById('title-input').value = item.title;
+                            document.getElementById('year-input').value = item.year;
+                            getTmdbDetails(item.id, item.type);
+                        };
+                        resultDiv.innerHTML = `
+                            <img src="${item.poster || 'https://via.placeholder.com/40x60'}" alt="Poster">
+                            <div class="search-result-info">
+                                <strong>${item.title} (${item.year})</strong>
+                                <span>Type: ${item.type.charAt(0).toUpperCase() + item.type.slice(1)}</span>
+                            </div>`;
+                        resultsBody.appendChild(resultDiv);
+                    });
+                    openModal('tmdb-results-modal');
+                } else {
+                    showNotification('No results found online.', 'warn');
+                }
+            } catch (error) { showNotification(`Search failed: ${error.message}`, 'error'); }
+        }
+
+        async function getTmdbDetails(id, type) {
+            try {
+                const response = await fetch('/api/metadata/details', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id: id, type: type })
+                });
+                const data = await response.json();
+                if (data.status === 'error') throw new Error(data.message);
+                
+                if (data.metadata) {
+                    document.getElementById('description-input').value = data.metadata.description || '';
+                    document.getElementById('image-input').value = data.metadata.image || '';
+                    if (data.metadata.runtime) {
+                        document.getElementById('duration-input').value = data.metadata.runtime;
+                    }
+                    showNotification('Details populated!', 'success');
+                }
+                closeModal('tmdb-results-modal');
+            } catch (error) { showNotification(`Failed to get details: ${error.message}`, 'error'); }
+        }
+
+        async function startStream() {
+            if (!activeTunerIp) { showNotification('Please start a session first.', 'error'); return; }
+            
+            const isRecording = currentMode === 'record';
+            const duration = parseInt(document.getElementById('duration-input').value, 10);
+            const padding = parseInt(document.getElementById('padding-input').value, 10);
+            const totalDuration = duration + padding;
+
+            const metadata = {
+                title: document.getElementById('title-input').value,
+                subtitle: document.getElementById('subtitle-input').value,
+                description: document.getElementById('description-input').value,
+                image: document.getElementById('image-input').value,
+                season: document.getElementById('season-input').value,
+                episode: document.getElementById('episode-input').value,
+                year: document.getElementById('year-input').value
+            };
+            const contentType = document.getElementById('content-type-select').value;
+
+            if (isRecording && (!totalDuration || totalDuration < 1)) { showNotification('A valid duration is required for recording.', 'error'); return; }
+            if (isRecording && !metadata.title) { showNotification('A title is required for recording.', 'error'); return; }
+
+            try {
+                const response = await fetch('/api/pretune/commit', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tuner_ip: activeTunerIp, record: isRecording, duration: totalDuration, metadata: metadata, content_type: contentType })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.message || 'Failed to commit stream.');
+                
+                showNotification(data.message, 'success');
+                
+                cleanupPlayer();
+                activeTunerIp = null;
+                fetchTunerStatus();
+                
+            } catch (error) { showNotification(`Error: ${error.message}`, 'error'); }
+        }
+        
+        window.addEventListener('beforeunload', () => {
+            if (activeTunerIp) {
+                const payload = JSON.stringify({ tuner_ip: activeTunerIp });
+                navigator.sendBeacon(window.location.origin + '/api/pretune/stop', payload);
+            }
+        });
+
+        function openModal(id) { document.getElementById(id).style.display = 'block'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        
+        // Drag-and-drop for the remote modal
+        const remoteModal = document.getElementById('remote-modal');
+        const remoteHeader = document.getElementById('remote-modal-header');
+        let isDragging = false;
+        let offset = [0, 0];
+
+        remoteHeader.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            offset = [
+                remoteModal.offsetLeft - e.clientX,
+                remoteModal.offsetTop - e.clientY
+            ];
+        }, true);
+
+        document.addEventListener('mouseup', function() {
+            isDragging = false;
+        }, true);
+
+        document.addEventListener('mousemove', function(e) {
+            if (isDragging) {
+                e.preventDefault();
+                remoteModal.style.left = (e.clientX + offset[0]) + 'px';
+                remoteModal.style.top = (e.clientY + offset[1]) + 'px';
+            }
+        }, true);
+
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchTunerStatus();
+            setMode('watch'); // Set initial mode
+            setInterval(fetchTunerStatus, 15000);
+        });
+    </script>
+</body>
+</html>
