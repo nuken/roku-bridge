@@ -357,16 +357,47 @@ def stream_ondemand():
 
 def generate_m3u_from_channels(channel_list, playlist_filter=None):
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
-    filtered_list = [ch for ch in channel_list if not playlist_filter or ch.get('playlist') == playlist_filter]
+    filtered_list = channel_list
+    if playlist_filter:
+        filtered_list = [ch for ch in channel_list if ch.get('playlist') == playlist_filter]
+        logging.info(f"Filtering M3U for playlist='{playlist_filter}'. Found {len(filtered_list)} matching channels.")
     for channel in filtered_list:
         stream_url = f"http://{request.host}/stream/{channel['id']}"
         extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
-        tags = {"tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo", "tvc-guide-stationid": "tvc_guide_stationid"}
+        
+        # --- START OF FIX ---
+        # Expanded the tags dictionary to include all possible custom EPG fields.
+        tags = {
+            "tvg-name": "name",
+            "channel-number": "channel-number",
+            "tvg-logo": "tvg-logo",
+            "tvc-guide-stationid": "tvc_guide_stationid",
+            "tvc-guide-art": "tvc-guide-art",
+            "tvc-guide-title": "tvc-guide-title",
+            "tvc-guide-description": "tvc-guide-description",
+            "tvc-guide-tags": "tvc-guide-tags",
+            "tvc-guide-genres": "tvc-guide-genres",
+            "tvc-guide-categories": "tvc-guide-categories",
+            "tvc-guide-placeholders": "tvc-guide-placeholders",
+            "tvc-stream-vcodec": "tvc-stream-vcodec",
+            "tvc-stream-acodec": "tvc-stream-acodec"
+        }
+        # --- END OF FIX ---
+
         for tag, key in tags.items():
-            if key in channel: extinf_line += f' {tag}="{channel[key]}"'
-        if 'playlist' in channel and channel['playlist']: extinf_line += f' group-title="{channel["playlist"]}"'
+            if key in channel and channel[key]:
+                # For tags that can be comma-separated lists, ensure they are formatted correctly.
+                if isinstance(channel[key], list):
+                    extinf_line += f' {tag}="{",".join(map(str, channel[key]))}"'
+                else:
+                    extinf_line += f' {tag}="{channel[key]}"'
+
+        if 'playlist' in channel and channel['playlist']:
+            extinf_line += f' group-title="{channel["playlist"]}"'
+            
         extinf_line += f',{channel["name"]}'
         m3u_content.extend([extinf_line, stream_url])
+        
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
 @app.route('/channels.m3u')
