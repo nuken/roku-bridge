@@ -103,6 +103,16 @@
         }
         .remote-button-small:active { background-color: #777; transform: scale(0.95); }
         #modal-remote-ok { background-color: var(--primary-color); color: #2c2c2c; font-weight: bold; }
+        .keyboard-section { display: flex; gap: 10px; margin-top: 10px; }
+        .keyboard-section input[type="text"] {
+            flex-grow: 1; padding: 10px; border-radius: 8px; border: 1px solid #555;
+            background-color: var(--bg-color); color: var(--text-color); font-size: 1em; min-width: 0;
+        }
+        .keyboard-section button {
+            padding: 10px; border-radius: 8px; border: none;
+            background-color: var(--primary-color); color: var(--bg-color); font-size: 1em;
+            cursor: pointer; transition: background-color 0.2s;
+        }
 
         @media (min-width: 769px) {
             .pretune-container { flex-direction: row; }
@@ -214,13 +224,11 @@
         </div>
     </div>
     <div id="tmdb-results-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Search Results</h3>
-                <span class="close-button" onclick="closeModal('tmdb-results-modal')">&times;</span>
-            </div>
-            <div class="modal-body" id="tmdb-results-body"></div>
+        <div class="modal-header">
+            <h3>Search Results</h3>
+            <span class="close-button" onclick="closeModal('tmdb-results-modal')">&times;</span>
         </div>
+        <div class="modal-body" id="tmdb-results-body"></div>
     </div>
 
     <div id="remote-modal">
@@ -246,6 +254,10 @@
                     <button class="remote-button-small" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
                     <button class="remote-button-small" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
                     <button class="remote-button-small" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
+                </div>
+                <div class="keyboard-section">
+                    <input type="text" id="remote-keyboard-input" placeholder="Type here...">
+                    <button onclick="sendRemoteText()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
             </div>
         </div>
@@ -407,6 +419,23 @@
             if (!activeTunerIp) { return; }
             try { await fetch(`/remote/keypress/${activeTunerIp}/${encodeURIComponent(key)}`, { method: 'POST' }); }
             catch (error) { console.error(`Failed to send key ${key}:`, error); }
+        }
+
+        async function sendRemoteText() {
+            const textInput = document.getElementById('remote-keyboard-input');
+            const text = textInput.value;
+            if (!text) return;
+            if (!activeTunerIp) {
+                showNotification('Please start a session first.');
+                return;
+            }
+            
+            for (const char of text) {
+                await sendKey(`Lit_${encodeURIComponent(char)}`);
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+            }
+            
+            textInput.value = '';
         }
         
         async function fetchRokuInfo() {
