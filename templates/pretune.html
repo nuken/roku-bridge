@@ -163,6 +163,7 @@
                         <label for="title-input">Title</label>
                         <input type="text" id="title-input" placeholder="Enter title to search online">
                     </div>
+                    <input type="hidden" id="year-input">
                     <div class="form-group" id="season-episode-fields" style="display: none;">
                         <div style="display: flex; gap: 10px;">
                             <div style="flex-grow: 1;">
@@ -479,6 +480,7 @@
                         resultDiv.className = 'search-result';
                         resultDiv.onclick = () => {
                             document.getElementById('title-input').value = item.title;
+                            document.getElementById('year-input').value = item.year;
                             getTmdbDetails(item.id, item.type);
                         };
                         resultDiv.innerHTML = `
@@ -531,7 +533,8 @@
                 description: document.getElementById('description-input').value,
                 image: document.getElementById('image-input').value,
                 season: document.getElementById('season-input').value,
-                episode: document.getElementById('episode-input').value
+                episode: document.getElementById('episode-input').value,
+                year: document.getElementById('year-input').value
             };
             const contentType = document.getElementById('content-type-select').value;
 
@@ -599,4 +602,5 @@
         });
     </script>
 </body>
+
 </html>
