@@ -9,7 +9,7 @@ import threading
 import httpx
 import urllib.parse
 import signal
-import xml.etree.ElementTree as ET
+from lxml import etree as ET # Switched to lxml for better XML parsing
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
@@ -69,7 +69,7 @@ AUDIO_CHANNELS = get_audio_channels()
 TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS = [], [], [], [], {}
 TUNER_LOCK = threading.Lock()
 KEEP_ALIVE_TASKS = {}
-PREVIEW_SESSIONS = {} 
+PREVIEW_SESSIONS = {}
 SESSION_LOCK = threading.Lock()
 RECORDING_PROCESSES = {}
 
@@ -82,7 +82,7 @@ executor = ThreadPoolExecutor(max_workers=10)
 def load_config():
     global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY
     default_config = {
-        "tuners": [], "channels": [], "epg_channels": [], 
+        "tuners": [], "channels": [], "epg_channels": [],
         "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""
     }
     
@@ -122,7 +122,7 @@ def load_config():
         
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
-        if TMDB_API_KEY: 
+        if TMDB_API_KEY:
             logging.info("TMDb API Key is configured.")
 
     except Exception as e:
@@ -254,6 +254,87 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
+# --- START OF NEW CODE ---
+def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
+    """
+    This function runs in a background thread to monitor the status of a recording.
+    It periodically queries the Roku to see if the content has finished playing.
+    """
+    start_time = time.time()
+    pause_start_time = None
+    POLL_INTERVAL = 15  # Check every 15 seconds
+    PAUSE_TIMEOUT = 900 # 15 minutes
+
+    logging.info(f"[Recording Watcher] Monitoring recording on tuner {tuner_ip}.")
+
+    while True:
+        time.sleep(POLL_INTERVAL)
+
+        # Failsafe: If the watcher runs for longer than the max duration, stop it.
+        if time.time() - start_time > max_duration_seconds:
+            logging.warning(f"[Recording Watcher] Max duration reached for {tuner_ip}. Stopping recording.")
+            break
+
+        # Check if the ffmpeg process is still running. If not, exit.
+        if ffmpeg_process.poll() is not None:
+            logging.info(f"[Recording Watcher] FFmpeg process for {tuner_ip} ended. Exiting watcher.")
+            break
+
+        try:
+            response = requests.get(f"http://{tuner_ip}:8060/query/media-player", timeout=3)
+            response.raise_for_status()
+            
+            root = ET.fromstring(response.content)
+            player_state = root.get('state')
+            
+            # Condition 1: Player is closed or stopped
+            if player_state in ['close', 'stop']:
+                logging.info(f"[Recording Watcher] Player state is '{player_state}'. Stopping recording for {tuner_ip}.")
+                break
+            
+            # Condition 2: Content finished playing
+            position_str = root.findtext('.//position')
+            duration_str = root.findtext('.//duration')
+
+            if position_str and duration_str:
+                try:
+                    position_ms = int(position_str.replace(' ms', ''))
+                    duration_ms = int(duration_str.replace(' ms', ''))
+
+                    if duration_ms > 0 and position_ms >= duration_ms - POLL_INTERVAL * 1000:
+                        logging.info(f"[Recording Watcher] Content finished playing on {tuner_ip}. Stopping recording.")
+                        break
+                except (ValueError, TypeError):
+                    pass # Could not parse position/duration, rely on failsafe timer
+
+            # Condition 3: Handle "Are you still watching?" prompts
+            if player_state == 'pause':
+                if pause_start_time is None:
+                    pause_start_time = time.time()
+                elif time.time() - pause_start_time > PAUSE_TIMEOUT:
+                    logging.warning(f"[Recording Watcher] Playback has been paused for over {PAUSE_TIMEOUT/60} minutes on {tuner_ip}. Stopping recording.")
+                    break
+            else:
+                pause_start_time = None
+
+        except requests.exceptions.RequestException:
+            logging.warning(f"[Recording Watcher] Could not connect to Roku {tuner_ip} to check status. Will rely on failsafe timer.")
+        except ET.ParseError:
+             logging.warning(f"[Recording Watcher] Failed to parse XML from Roku {tuner_ip}. Will rely on failsafe timer.")
+
+    # --- Cleanup ---
+    if ffmpeg_process.poll() is None:
+        logging.info(f"[Recording Watcher] Terminating ffmpeg process for {tuner_ip}.")
+        ffmpeg_process.terminate()
+        try:
+            ffmpeg_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            logging.warning(f"[Recording Watcher] FFmpeg process for {tuner_ip} did not terminate gracefully. Killing.")
+            ffmpeg_process.kill()
+            
+    release_tuner(tuner_ip)
+# --- END OF NEW CODE ---
+
 def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
     if not tuner:
@@ -261,7 +342,8 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         return
 
     encoder_url = tuner['encoder_url']
-    duration_seconds = duration_minutes * 60
+    # Add a 5-minute buffer to the user-provided duration to act as a failsafe
+    duration_seconds = (duration_minutes + 5) * 60
     
     title = metadata.get('title', 'On-Demand Recording')
     year = metadata.get('year', '')
@@ -271,8 +353,12 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
 
     if content_type == 'show':
         try:
-            season_str = metadata.get('season') or '0'
-            episode_str = metadata.get('episode') or '0'
+            season_str = metadata.get('season')
+            episode_str = metadata.get('episode')
+            
+            if not season_str or not episode_str:
+                raise ValueError("Season or episode number is missing.")
+
             season = int(season_str)
             episode = int(episode_str)
             
@@ -287,7 +373,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
             
             output_path = os.path.join(season_folder, f"{filename}.mkv")
         except (ValueError, TypeError):
-            logging.error(f"Invalid season or episode number for {title}. Saving to default location.")
+            logging.error(f"Invalid or missing season/episode number for {title}. Saving to default location.")
             output_path = os.path.join(RECORDINGS_DIR, 'TV Shows', f"{safe_title}.mkv")
 
     else: # Movie
@@ -296,9 +382,11 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         filename = f"{safe_title} ({year})"
         output_path = os.path.join(movie_folder, f"{filename}.mkv")
     
+    # --- MODIFIED COMMAND ---
+    # Added -y to overwrite and removed the -t duration flag, as the watcher will handle stopping.
     command = [
-        'ffmpeg', '-y', '-i', encoder_url, '-t', str(duration_seconds),
-        '-c', 'copy', '-map', '0', 
+        'ffmpeg', '-y', '-i', encoder_url,
+        '-c', 'copy', '-map', '0',
         '-metadata', f"title={title}",
         '-metadata', f"comment={metadata.get('description', '')}",
         '-f', 'matroska', '-loglevel', 'error', output_path
@@ -320,7 +408,11 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         RECORDING_PROCESSES[tuner_ip] = process
         logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
         
-        threading.Timer(duration_seconds + 5, release_tuner, args=[tuner_ip]).start()
+        # --- START THE NEW WATCHER THREAD ---
+        # The old threading.Timer is replaced with this.
+        watcher_thread = threading.Thread(target=watch_recording_session, args=(tuner_ip, process, duration_seconds))
+        watcher_thread.daemon = True
+        watcher_thread.start()
         
     except Exception as e:
         logging.error(f"[Recording] Failed to start local recording: {e}")
@@ -452,7 +544,7 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
 def generate_gracenote_m3u(): return generate_m3u_from_channels(CHANNELS, request.args.get('playlist'))
 
 @app.route('/epg_channels.m3u')
-def generate_epg_m3u(): return generate_m3u_from_channels(EPG_CHANNELS, request.args.get('playlist'))
+def generate_epg_m3u(): return generate_m3u_from_channels(EPG_CHANNELS,.py request.args.get('playlist'))
 
 @app.route('/ondemand.m3u')
 def generate_ondemand_m3u():
