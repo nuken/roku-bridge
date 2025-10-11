@@ -271,12 +271,8 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
 
     if content_type == 'show':
         try:
-            season_str = metadata.get('season')
-            episode_str = metadata.get('episode')
-            
-            if not season_str or not episode_str:
-                raise ValueError("Season or episode number is missing.")
-
+            season_str = metadata.get('season') or '0'
+            episode_str = metadata.get('episode') or '0'
             season = int(season_str)
             episode = int(episode_str)
             
@@ -291,7 +287,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
             
             output_path = os.path.join(season_folder, f"{filename}.mkv")
         except (ValueError, TypeError):
-            logging.error(f"Invalid or missing season/episode number for {title}. Saving to default location.")
+            logging.error(f"Invalid season or episode number for {title}. Saving to default location.")
             output_path = os.path.join(RECORDINGS_DIR, 'TV Shows', f"{safe_title}.mkv")
 
     else: # Movie
@@ -301,7 +297,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         output_path = os.path.join(movie_folder, f"{filename}.mkv")
     
     command = [
-        'ffmpeg', '-i', encoder_url, '-t', str(duration_seconds),
+        'ffmpeg', '-y', '-i', encoder_url, '-t', str(duration_seconds),
         '-c', 'copy', '-map', '0', 
         '-metadata', f"title={title}",
         '-metadata', f"comment={metadata.get('description', '')}",
