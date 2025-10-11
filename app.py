@@ -254,7 +254,7 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-# --- START OF NEW CODE ---
+# --- START OF MODIFIED WATCHER FUNCTION ---
 def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
     """
     This function runs in a background thread to monitor the status of a recording.
@@ -262,8 +262,12 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
     """
     start_time = time.time()
     pause_start_time = None
+    initial_duration_ms = None
+    last_position_ms = 0
+    
     POLL_INTERVAL = 15  # Check every 15 seconds
     PAUSE_TIMEOUT = 900 # 15 minutes
+    POSITION_RESET_THRESHOLD = 30000 # 30 seconds
 
     logging.info(f"[Recording Watcher] Monitoring recording on tuner {tuner_ip}.")
 
@@ -272,7 +276,7 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
 
         # Failsafe: If the watcher runs for longer than the max duration, stop it.
         if time.time() - start_time > max_duration_seconds:
-            logging.warning(f"[Recording Watcher] Max duration reached for {tuner_ip}. Stopping recording.")
+            logging.warning(f"[Recording Watcher] Max duration failsafe reached for {tuner_ip}. Stopping recording.")
             break
 
         # Check if the ffmpeg process is still running. If not, exit.
@@ -292,22 +296,37 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
                 logging.info(f"[Recording Watcher] Player state is '{player_state}'. Stopping recording for {tuner_ip}.")
                 break
             
-            # Condition 2: Content finished playing
+            # --- Start of new state-aware logic ---
             position_str = root.findtext('.//position')
             duration_str = root.findtext('.//duration')
 
             if position_str and duration_str:
                 try:
-                    position_ms = int(position_str.replace(' ms', ''))
-                    duration_ms = int(duration_str.replace(' ms', ''))
+                    current_position_ms = int(position_str.replace(' ms', ''))
+                    current_duration_ms = int(duration_str.replace(' ms', ''))
 
-                    if duration_ms > 0 and position_ms >= duration_ms - POLL_INTERVAL * 1000:
+                    # Capture the initial duration on the first valid poll
+                    if initial_duration_ms is None and current_duration_ms > 0:
+                        initial_duration_ms = current_duration_ms
+                        logging.info(f"[Recording Watcher] Captured initial duration for {tuner_ip}: {initial_duration_ms / 1000 / 60:.2f} minutes.")
+
+                    # Condition 2: Auto-play detected (position resets)
+                    if current_position_ms < last_position_ms - POSITION_RESET_THRESHOLD:
+                        logging.info(f"[Recording Watcher] Position reset detected on {tuner_ip}. Assuming auto-play and stopping recording.")
+                        break
+                    
+                    # Condition 3: Content finished playing against the *initial* duration
+                    if initial_duration_ms and current_position_ms >= initial_duration_ms - (POLL_INTERVAL * 1000):
                         logging.info(f"[Recording Watcher] Content finished playing on {tuner_ip}. Stopping recording.")
                         break
+
+                    last_position_ms = current_position_ms
+
                 except (ValueError, TypeError):
                     pass # Could not parse position/duration, rely on failsafe timer
+            # --- End of new state-aware logic ---
 
-            # Condition 3: Handle "Are you still watching?" prompts
+            # Condition 4: Handle "Are you still watching?" prompts
             if player_state == 'pause':
                 if pause_start_time is None:
                     pause_start_time = time.time()
@@ -333,7 +352,7 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
             ffmpeg_process.kill()
             
     release_tuner(tuner_ip)
-# --- END OF NEW CODE ---
+# --- END OF MODIFIED WATCHER FUNCTION ---
 
 def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
@@ -382,8 +401,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         filename = f"{safe_title} ({year})"
         output_path = os.path.join(movie_folder, f"{filename}.mkv")
     
-    # --- MODIFIED COMMAND ---
-    # Added -y to overwrite and removed the -t duration flag, as the watcher will handle stopping.
+    # The -t duration flag is removed, as the watcher will handle stopping.
     command = [
         'ffmpeg', '-y', '-i', encoder_url,
         '-c', 'copy', '-map', '0',
@@ -408,8 +426,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         RECORDING_PROCESSES[tuner_ip] = process
         logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
         
-        # --- START THE NEW WATCHER THREAD ---
-        # The old threading.Timer is replaced with this.
+        # Start the new watcher thread
         watcher_thread = threading.Thread(target=watch_recording_session, args=(tuner_ip, process, duration_seconds))
         watcher_thread.daemon = True
         watcher_thread.start()
@@ -544,7 +561,7 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
 def generate_gracenote_m3u(): return generate_m3u_from_channels(CHANNELS, request.args.get('playlist'))
 
 @app.route('/epg_channels.m3u')
-def generate_epg_m3u(): return generate_m3u_from_channels(EPG_CHANNELS,.py request.args.get('playlist'))
+def generate_epg_m3u(): return generate_m3u_from_channels(EPG_CHANNELS, request.args.get('playlist'))
 
 @app.route('/ondemand.m3u')
 def generate_ondemand_m3u():
