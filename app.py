@@ -240,7 +240,7 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
                 command.extend(['-c:v', 'copy', '-c:a', 'aac', '-b:a', AUDIO_BITRATE, '-ac', AUDIO_CHANNELS])
             else:
                 command.extend(['-c', 'copy'])
-            command.extend(['-f', 'mpegts', '-loglevel', 'error', '-'])
+            command.extend(['-f', 'mpegts', '-loglevel', 'fatal', '-'])
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             for chunk in iter(lambda: process.stdout.read(8192), b''): yield chunk
             process.wait()
@@ -423,7 +423,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         '-c', 'copy', '-map', '0',
         '-metadata', f"title={title}",
         '-metadata', f"comment={metadata.get('description', '')}",
-        '-f', 'matroska', '-loglevel', 'error', output_path
+        '-f', 'matroska', '-loglevel', 'fatal', output_path
     ]
 
     try:
