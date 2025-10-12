@@ -463,6 +463,15 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, co
         
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for local recording.")
+            
+            # --- START OF NEW CODE ---
+            # Send the "Play" command to start the content from its paused state
+            logging.info(f"[Recording] Sending 'Play' command to {tuner_ip} to begin recording.")
+            send_key_sequence(tuner_ip, ["Play"])
+            # Give the stream a moment to start before ffmpeg connects
+            time.sleep(1) 
+            # --- END OF NEW CODE ---
+
             start_local_recording(tuner_ip, duration, metadata, content_type)
             session['is_recording_queued'] = True
             return {"status": "success", "message": "Local recording started."}

@@ -132,6 +132,10 @@
                 <button id="record-mode-btn" class="mode-btn" onclick="setMode('record')">Record</button>
              </div>
              
+             <p id="record-instructions" style="text-align: center; color: var(--text-color); font-size: 0.9em; display: none;">
+                 <strong>Instructions:</strong> Pause your content at the desired start point before recording.
+             </p>
+             
              <div id="tuner-list-container">
                 <h3>Select a Tuner</h3>
                 <div id="tuner-list"></div>
@@ -278,6 +282,11 @@
             document.getElementById('watch-mode-btn').classList.toggle('active', mode === 'watch');
             document.getElementById('record-mode-btn').classList.toggle('active', mode === 'record');
             recordingOptions.style.display = mode === 'record' ? 'block' : 'none';
+            
+            // --- ADD THIS LINE ---
+            document.getElementById('record-instructions').style.display = mode === 'record' ? 'block' : 'none';
+            // --- END ---
+
             document.getElementById('start-stream').textContent = mode === 'record' ? 'Start Local Recording' : 'Send to Channels DVR';
         }
 
@@ -602,5 +611,4 @@
         });
     </script>
 </body>
-
 </html>
