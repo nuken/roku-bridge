@@ -284,11 +284,29 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
             logging.info(f"[Recording Watcher] FFmpeg process for {tuner_ip} ended. Exiting watcher.")
             break
 
+        # --- START of retry logic ---
+        retries = 0
+        media_player_xml = None
+        while retries < 2:
+            try:
+                response = requests.get(f"http://{tuner_ip}:8060/query/media-player", timeout=3)
+                response.raise_for_status()
+                media_player_xml = response.content
+                break  # Success, exit retry loop
+            except requests.exceptions.RequestException as e:
+                retries += 1
+                if retries < 2:
+                    logging.warning(f"[Recording Watcher] Could not connect to Roku {tuner_ip} to check status. Retrying... ({retries}/1)")
+                    time.sleep(5)  # Wait 5 seconds before retrying
+                else:
+                    logging.warning(f"[Recording Watcher] Could not connect to Roku {tuner_ip} after multiple attempts. Will rely on failsafe timer. Error: {e}")
+        # --- END of retry logic ---
+
+        if not media_player_xml:
+            continue # Go to next poll interval if we couldn't get the status
+
         try:
-            response = requests.get(f"http://{tuner_ip}:8060/query/media-player", timeout=3)
-            response.raise_for_status()
-            
-            root = ET.fromstring(response.content)
+            root = ET.fromstring(media_player_xml)
             player_state = root.get('state')
             
             # Condition 1: Player is closed or stopped
@@ -336,8 +354,6 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
             else:
                 pause_start_time = None
 
-        except requests.exceptions.RequestException:
-            logging.warning(f"[Recording Watcher] Could not connect to Roku {tuner_ip} to check status. Will rely on failsafe timer.")
         except ET.ParseError:
              logging.warning(f"[Recording Watcher] Failed to parse XML from Roku {tuner_ip}. Will rely on failsafe timer.")
 
