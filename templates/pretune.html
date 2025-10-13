@@ -248,7 +248,10 @@
                 <div class="remote-row">
                     <button class="remote-button-small" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
                     <button class="remote-button-small" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
-                    <button class="remote-button-small" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                    <button class="remote-button-small" id="modal-remote-play-pause" onclick="togglePlayPause(this)">
+                        <i class="fa-solid fa-play"></i>
+                        <i class="fa-solid fa-pause" style="display: none;"></i>
+                    </button>
                 </div>
                 <div class="d-pad" style="justify-items: center;">
                     <button class="remote-button-small" style="grid-area: 1 / 2;" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
@@ -431,6 +434,19 @@
             if (!activeTunerIp) { return; }
             try { await fetch(`/remote/keypress/${activeTunerIp}/${encodeURIComponent(key)}`, { method: 'POST' }); }
             catch (error) { console.error(`Failed to send key ${key}:`, error); }
+        }
+
+        function togglePlayPause(button) {
+            sendKey('Play');
+            const playIcon = button.querySelector('.fa-play');
+            const pauseIcon = button.querySelector('.fa-pause');
+            if (playIcon.style.display === 'none') {
+                playIcon.style.display = 'inline-block';
+                pauseIcon.style.display = 'none';
+            } else {
+                playIcon.style.display = 'none';
+                pauseIcon.style.display = 'inline-block';
+            }
         }
 
         async function sendRemoteText() {

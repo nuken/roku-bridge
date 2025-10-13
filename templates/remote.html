@@ -134,7 +134,10 @@
             </div>
             <div class="button-row">
                 <button class="remote-button" id="button-rewind" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
-                <button class="remote-button" id="button-play-pause" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                <button class="remote-button" id="button-play-pause" onclick="togglePlayPause(this)">
+                    <i class="fa-solid fa-play"></i>
+                    <i class="fa-solid fa-pause" style="display: none;"></i>
+                </button>
                 <button class="remote-button" id="button-fast-forward" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
             </div>
         </div>
@@ -225,6 +228,19 @@
             } catch (error) {
                 console.error(`Failed to send key ${key}:`, error);
                 showNotification('Failed to send command.');
+            }
+        }
+
+        function togglePlayPause(button) {
+            sendKey('Play');
+            const playIcon = button.querySelector('.fa-play');
+            const pauseIcon = button.querySelector('.fa-pause');
+            if (playIcon.style.display === 'none') {
+                playIcon.style.display = 'inline-block';
+                pauseIcon.style.display = 'none';
+            } else {
+                playIcon.style.display = 'none';
+                pauseIcon.style.display = 'inline-block';
             }
         }
         
