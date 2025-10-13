@@ -286,9 +286,7 @@
             document.getElementById('record-mode-btn').classList.toggle('active', mode === 'record');
             recordingOptions.style.display = mode === 'record' ? 'block' : 'none';
             
-            // --- ADD THIS LINE ---
             document.getElementById('record-instructions').style.display = mode === 'record' ? 'block' : 'none';
-            // --- END ---
 
             document.getElementById('start-stream').textContent = mode === 'record' ? 'Start Local Recording' : 'Send to Channels DVR';
         }
@@ -590,34 +588,49 @@
             }
         });
 
-        function openModal(id) { document.getElementById(id).style.display = 'block'; }
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
         
-        // Drag-and-drop for the remote modal
+        // --- START OF MODIFIED DRAG AND DROP CODE ---
         const remoteModal = document.getElementById('remote-modal');
         const remoteHeader = document.getElementById('remote-modal-header');
         let isDragging = false;
         let offset = [0, 0];
 
-        remoteHeader.addEventListener('mousedown', function(e) {
+        function dragStart(e) {
             isDragging = true;
+            const clientX = e.clientX || e.touches[0].clientX;
+            const clientY = e.clientY || e.touches[0].clientY;
             offset = [
-                remoteModal.offsetLeft - e.clientX,
-                remoteModal.offsetTop - e.clientY
+                remoteModal.offsetLeft - clientX,
+                remoteModal.offsetTop - clientY
             ];
-        }, true);
+        }
 
-        document.addEventListener('mouseup', function() {
+        function dragEnd() {
             isDragging = false;
-        }, true);
+        }
 
-        document.addEventListener('mousemove', function(e) {
+        function drag(e) {
             if (isDragging) {
                 e.preventDefault();
-                remoteModal.style.left = (e.clientX + offset[0]) + 'px';
-                remoteModal.style.top = (e.clientY + offset[1]) + 'px';
+                const clientX = e.clientX || e.touches[0].clientX;
+                const clientY = e.clientY || e.touches[0].clientY;
+                remoteModal.style.left = (clientX + offset[0]) + 'px';
+                remoteModal.style.top = (clientY + offset[1]) + 'px';
             }
-        }, true);
+        }
+
+        // Mouse Events
+        remoteHeader.addEventListener('mousedown', dragStart, true);
+        document.addEventListener('mouseup', dragEnd, true);
+        document.addEventListener('mousemove', drag, true);
+
+        // Touch Events
+        remoteHeader.addEventListener('touchstart', dragStart, true);
+        document.addEventListener('touchend', dragEnd, true);
+        document.addEventListener('touchmove', drag, { passive: false });
+        // --- END OF MODIFIED DRAG AND DROP CODE ---
 
 
         document.addEventListener('DOMContentLoaded', () => {
