@@ -83,6 +83,7 @@
             display: none; position: fixed; z-index: 1002; left: 50px; top: 50px;
             background-color: var(--surface-color); border-radius: 20px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.4); width: auto;
+            flex-direction: column; /* This is the fix */
         }
         #remote-modal-header {
             padding: 10px; cursor: move; background-color: var(--border-color);
@@ -591,7 +592,6 @@
         function openModal(id) { document.getElementById(id).style.display = 'flex'; }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
         
-        // --- START OF MODIFIED DRAG AND DROP CODE ---
         const remoteModal = document.getElementById('remote-modal');
         const remoteHeader = document.getElementById('remote-modal-header');
         let isDragging = false;
@@ -630,7 +630,6 @@
         remoteHeader.addEventListener('touchstart', dragStart, true);
         document.addEventListener('touchend', dragEnd, true);
         document.addEventListener('touchmove', drag, { passive: false });
-        // --- END OF MODIFIED DRAG AND DROP CODE ---
 
 
         document.addEventListener('DOMContentLoaded', () => {
