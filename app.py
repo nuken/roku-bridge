@@ -14,7 +14,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
 from werkzeug.utils import secure_filename
-from opensubtitles_api import OpenSubtitles
+from opensubtitlescom import OpenSubtitles
 
 # --- Import Plugin System ---
 from plugins import discovered_plugins

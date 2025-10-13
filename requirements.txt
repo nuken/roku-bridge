@@ -4,4 +4,4 @@ gunicorn
 gevent
 httpx
 lxml
-opensubtitles-api
+opensubtitlescom
