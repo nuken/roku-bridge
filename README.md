@@ -1,167 +1,129 @@
+
 # **Roku Channels Bridge**
 
-**Release: Beta 3.0**
+**Release: Beta 5.0.4**
 
 [**Official Configuration Guide**](https://tuner.ct.ws)
 
-This project provides a Dockerized bridge that integrates your Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and uses this script to manage channel changes and proxy the video stream.
+This project provides a bridge that integrates your Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and uses this script to manage channel changes and proxy the video stream.
 
-This setup allows you to use streaming service channels (like those from YouTube TV, Philo, etc.) just like traditional cable channels inside the Channels app.
+This setup allows you to use streaming service channels (like those from YouTube TV, Philo, etc.) and on-demand apps (like Max and Netflix) just like traditional cable channels inside the Channels app.
 
 ## **Key Features**
 
   * **Seamless Integration:** Adds Roku-based channels directly into your Channels DVR guide.
+  * **Intelligent On-Demand Recording:** A dedicated **Pre-Tuning** page allows you to stage content from any on-demand app, start recording with the press of a button, and have the recording automatically stop when the content finishes or if the next episode starts to auto-play.
   * **Advanced Tuning Methods:** Supports direct **Deep Linking**, custom **Key-Sequence** tuning, and an extensible **Plugin System** for apps that require complex navigation.
   * **Hide the Tuning Process:** Use the **Blanking Duration** feature to show a black screen while the Roku tunes in the background, providing a seamless, professional viewing experience.
-  * **Dual M3U Support:** Generates two separate M3U playlists—one optimized for **Gracenote** guide data and another for custom **XMLTV/EPG** data.
+  * **Triple M3U Support:** Generates three separate M3U playlists—one for **Gracenote**, one for custom **XMLTV/EPG** data, and a new one for **On-Demand Apps**.
   * **Web-Based Management:** A built-in **Status Page** to monitor your devices and manage your entire configuration with an intuitive UI.
   * **Remote Control:** A web-based **Remote** to control any of your configured Roku devices from a browser on your phone, tablet, or computer.
+  * **Metadata Integration**: Automatically searches TMDb, embeds metadata (title, summary) into recorded files, and saves artwork for seamless integration with media servers like Plex, Jellyfin, or Channels DVR.
   * **Flexible Streaming Modes:** Choose between `proxy`, `remux`, or an efficient audio-only `reencode` mode to ensure stream stability with minimal CPU usage. This can be set per-tuner.
   * **Hardware Acceleration:** Automatically detects and uses NVIDIA (NVENC) or Intel (QSV) GPUs for video processing if available.
   * **Persistent Configuration:** Uses a Docker volume to safely store your configuration, so it persists through container updates and restarts.
+
+-----
 
 ## **Installation**
 
 The application is distributed as a multi-architecture Docker image, ready to run.
 
-### **Step 1: Pull the Docker Image**
+### 1\. Run with Docker
 
-Open a terminal or PowerShell and pull the latest image from Docker Hub.
+The easiest way to run the application is with Docker Compose.
 
-```
-docker pull rcvaughn2/roku-ecp-tuner:test
-```
+1.  Create a folder for your project. This folder's location is important, as it's where your recordings will be saved.
 
-### **Step 2: Run the Docker Container**
+2.  Inside that folder, create a file named `docker-compose.yml` and add the following content:
 
-Run the container using the command below. This command creates a persistent Docker volume named `roku-bridge-config` where your `roku_channels.json` and plugin files will be safely stored.
+    ```yaml
+    services:
+      roku-bridge:
+        image: rcvaughn2/roku-ecp-tuner:test
+        container_name: roku-bridge-test
+        ports:
+          - "5006:5000" # Host port : Container port
+        volumes:
+          - roku-bridge-config:/app/config
+          - ./recordings:/app/recordings
+        environment:
+          - ENABLE_DEBUG_LOGGING=true
+        restart: unless-stopped
 
-```
-docker run -d  \
---name roku-channels-bridge  \
--p 5006:5000  \
--v roku-bridge-config:/app/config  \
---restart unless-stopped  \
-rcvaughn2/roku-ecp-tuner:test
-```
+    volumes:
+      roku-bridge-config:
+    ```
 
-**Note on GPU Acceleration (Linux):** If you need hardware acceleration for the `reencode` mode, add the `--device=/dev/dri` flag to the `docker run` command.
+    **Note:** The `- ./recordings:/app/recordings` line means a `recordings` folder will be created on your host machine in the same directory as your `docker-compose.yml` file.
 
-### **Step 3: Configure Your Tuners & Channels**
+3.  Open a terminal in your project folder and run: `docker-compose up -d`
 
-1.  Open your web browser and navigate to the Status & Configuration Page:
-    `http://<IP_OF_DOCKER_HOST>:5006/status`
-2.  Use the intuitive web interface to:
-      * **Add Your Tuners:** Click "Add Tuner" and fill in the details for each Roku and HDMI encoder pair.
-      * **Add Your Channels:** Add your Gracenote and Custom EPG channels using the dedicated "Add Channel" buttons. The forms provide all required and optional fields for deep linking, key sequences, and plugins.
-      * **Save Changes:** Once you've added your hardware and channels, click the "Save All Changes" button at the bottom of the page.
+### 2\. Configure Your Tuners & Integrations
 
-The server will automatically reload with your new configuration, and the status of your tuners will be displayed. Your setup is now complete.
+Once the container is running, open your web browser and navigate to `http://<your-ip>:5006/status` to access the configuration panel.
+
+  * **Tuners**: Add each of your Roku devices by providing a name, its IP address, and the URL of its corresponding HDMI encoder stream.
+  * **Integrations**: To enable automatic metadata and artwork lookup for your recordings, you need a free API key from **The Movie Database (TMDb)**.
+    1.  Register for a free account at [https://www.themoviedb.org/signup](https://www.themoviedb.org/signup).
+    2.  In your account settings, go to the **API** section and request a key.
+    3.  Copy the **API Key (v3 auth)** and paste it into the "TMDb API Key" field in the Integrations section of the config page.
+    4.  Click **Save All Changes**.
+
+-----
 
 ## **Usage**
 
-### **Channels DVR Setup**
+### Using the On-Demand Recording Feature
 
-This bridge generates two M3U playlist files. The URLs are conveniently displayed on the Status page.
+This feature is designed to give you perfect, clean recordings of on-demand content from any Roku app.
+
+1.  **Navigate to Pre-Tune**: Open `http://<your-ip>:5006/pretune`.
+
+2.  **Start a Session**: Select an available tuner from the list and click "Start". A live video preview from the Roku will appear.
+
+3.  **Select Record Mode**: Click the **Record** button to reveal the recording options.
+
+4.  **Stage Your Content (Most Important Step)**:
+
+      * Use the remote to navigate to the movie or show you want to record.
+      * Start playing the content, and then immediately **pause it** at the exact moment you want the recording to begin (e.g., right after the studio logos).
+
+5.  **Fill in Metadata**:
+
+      * Select the "Content-Type" (Movie or TV Show).
+      * Type the title into the "Title" field and click **"Search Online"**.
+      * Click the correct result from the list to automatically fill in the description, duration, and artwork.
+
+6.  **Start Recording**: Once your content is paused and ready, click **"Start Local Recording"**. The application will automatically send the "Play" command to the Roku and begin recording. The recording will stop automatically when the content finishes.
+
+### Channels DVR Setup
+
+This bridge generates three M3U playlist files. The URLs are conveniently displayed on the Status page.
 
   * **Gracenote M3U URL:** `http://<IP_OF_DOCKER_HOST>:5006/channels.m3u`
   * **Custom EPG M3U URL:** `http://<IP_OF_DOCKER_HOST>:5006/epg_channels.m3u`
+  * **On-Demand M3U URL:** `http://<IP_OF_DOCKER_HOST>:5006/ondemand.m3u`
 
-To add a source:
+To add a source for live channels, open your Channels DVR server settings, go to "Sources," click "+ Add Source," choose "Custom Channels," and enter the desired M3U URL.
 
-1.  Open your Channels DVR server settings.
-2.  Under "Sources," click "+ Add Source" and choose "Custom Channels."
-3.  Enter the desired M3U URL from above and configure the options as needed.
+### Integrating Local Recordings with Channels DVR
 
-### **Web Interface**
+To view your recordings in Channels DVR, add the `recordings` subfolders as "Personal Media".
 
-  * **Status & Config Page:** `http://<IP_OF_DOCKER_HOST>:5006/status`
-      * Monitor the online/offline status of your Rokus and encoders.
-      * Add, edit, and delete all tuners and channels.
-      * Download your configuration for backup or upload a file to restore.
-  * **Remote Control:** `http://<IP_OF_DOCKER_HOST>:5006/remote`
-      * A full-featured remote control for any Roku device listed in your configuration file.
+**Note**: The `Movies` and `TV Shows` folders will not be created until you make at least one recording of each type.
 
-## **Advanced Tuning Methods**
+1.  Make your first movie and/or TV show recording.
+2.  In the Channels DVR Server web UI, go to **Settings** -\> **Sources**.
+3.  Click **Add Source** -\> **Personal Media**.
+4.  **Add Movies**:
+      * Name: `Recorded Movies`
+      * Path: Navigate to your `recordings` folder and select the `Movies` subfolder.
+      * Content Type: **Movies**
+5.  **Add TV Shows**:
+      * Click **Add Source** -\> **Personal Media** again.
+      * Name: `Recorded TV Shows`
+      * Path: Navigate to your `recordings` folder and select the `TV Shows` subfolder.
+      * Content Type: **TV Shows**
 
-For apps that don't support direct deep-linking, you have two powerful options.
-
-### **1. Key Sequence Tuning**
-
-Define a sequence of remote control commands to navigate to the correct channel after an app has launched.
-
-  * **`Tune Delay`**: Pauses the script after launching the app to give it time to load *before* sending commands. (Default: 1s)
-  * **`Blanking Duration`**: Shows a black screen for a set number of seconds to hide the tuning process from view. This should be long enough to cover the Tune Delay and the entire key sequence.
-
-#### **Available Commands**
-
-  * **`Up`**, **`Down`**, **`Left`**, **`Right`**: Navigational arrow keys.
-  * **`Select`**: The "OK" button.
-  * **`wait=<seconds>`**: Pauses the sequence for a specific duration (e.g., `wait=2` for two seconds).
-
-### **2. Plugin System**
-
-For even more complex tuning logic, you can use app-specific Python plugins. A plugin allows you to define a custom tuning sequence in code, giving you maximum flexibility.
-
-  * **`plugin_script`**: Select the plugin file to use for the channel.
-  * **`plugin_data`**: A field for providing custom data to your plugin, such as a channel's position in a guide list.
-
-To add a new plugin, simply create a new `_plugin.py` file in your `config/plugins` directory. The application will automatically detect and load it.
-
-#### **Fubo Plugin (`fubo_plugin.py`)**
-
-The Fubo plugin is designed to navigate the guide and select a channel based on its position in the list.
-
-  * **Recommendation:** For the best performance, favorite the channels you want to use within the Fubo app itself. This will place them at the top of the guide, significantly reducing the time and keypresses needed for the plugin to tune to a channel.
-  * **Usage:**
-    1.  In the web UI, when adding or editing a channel, select `fubo_plugin.py` from the **Plugin Script** dropdown.
-    2.  In the **Plugin List Position** field, enter the numerical position of the channel in your Fubo guide (e.g., `1` for the first channel, `2` for the second, and so on).
-
-### **3. Keep Alive: Handling "Still Watching?" Prompts**
-
-Some streaming apps, like DirecTV, will display a prompt asking if you are still watching after a long period of inactivity (e.g., 4 hours). The **Keep Alive** feature can automatically dismiss these prompts.
-
-  * **How it works:** When enabled for a channel, the bridge will send a specified keypress sequence to the Roku at a user-defined interval, simulating activity and preventing the prompt from ever appearing.
-  * **Configuration:**
-    1.  When adding or editing a channel in the web UI, find the **Keep Alive** section.
-    2.  Check the box to **enable** the feature.
-    3.  Set the **Interval** in minutes (defaults to 225, which is 3 hours and 45 minutes).
-    4.  In the **Keypress Sequence** field, enter the command you want to send. You can enter a single key or a comma-separated list of keys, including the `wait=<seconds>` command (e.g., `Left,wait=1,Right`). For DirecTV, a single `Left` keypress is sufficient.
-
-## **Configuration File (`roku_channels.json`)**
-
-While all settings can be managed through the web interface, the configuration is stored in a `roku_channels.json` file. This section serves as a reference for the data structure.
-
-### **`tuners` Section**
-
-  * **`name`**: A friendly name for the device pair.
-  * **`roku_ip`**: The IP address of the Roku device.
-  * **`encoder_url`**: The full URL of the video stream from the HDMI encoder.
-  * **`priority`**: Determines the order tuners are used (lower number = higher priority).
-  * **`encoding_mode`**: **(Optional)** Sets the stream handling mode for this specific tuner (`proxy`, `remux`, or `reencode`).
-
-### **`channels` Section (Example with Keep Alive)**
-
-```json
-{
-  "id": "directv_espn",
-  "name": "ESPN",
-  "roku_app_id": "535121", 
-  "tvc_guide_stationid": "20364",
-  "media_type": "live",
-  "tune_delay": 8,
-  "key_sequence": [
-    "Select"
-  ],
-  "keep_alive_enabled": true,
-  "keep_alive_key": "Left,wait=1,Right",
-  "keep_alive_interval": 225
-}
-```
-
-## **Advanced Settings (Environment Variables)**
-
-  * **`ENCODING_MODE`**: Set the global default stream handling mode (`proxy`, `remux`, `reencode`).
-  * **`AUDIO_BITRATE`**: Set audio quality for `reencode` mode (e.g., `192k`).
-  * **`AUDIO_CHANNELS`**: Set the number of audio channels (e.g., `5.1`).
-  * **`ENABLE_DEBUG_LOGGING`**: Set to `true` for detailed logs.
+Channels DVR will now scan these folders and import your recordings with all the metadata and artwork.

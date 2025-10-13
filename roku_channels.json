@@ -21,22 +21,44 @@
     "deep_link_content_id": "Q2hhbm5lbDo2MDg1NDg4OTk2NDg0Mzk2MDg",
     "media_type": "live",
     "tvc_guide_stationid": "19211"
-  },
-  {
+   },
+   {
     "id": "philo_cc",
     "name": "Comedy Central",
     "roku_app_id": "196460",
     "deep_link_content_id": "Q2hhbm5lbDo2MDg1NDg4OTk2NDg0Mzg0OTk",
     "media_type": "live",
     "tvc_guide_stationid": "10149"
-  },
-  {
+   },
+   {
     "id": "youtube_tv_fox",
     "name": "FOX",
     "roku_app_id": "195316",
     "deep_link_content_id": "Gs-ILaF-HNw",
     "media_type": "live",
     "tvc_guide_stationid": "11594"
-  }
+   }
+  ],
+  "ondemand_apps": [
+    {
+     "name": "Max",
+     "id": "max_app",
+     "roku_app_id": "8378"
+    },
+    {
+     "name": "Netflix",
+     "id": "netflix_app",
+     "roku_app_id": "13"
+    },
+    {
+     "name": "Hulu",
+     "id": "hulu_app",
+     "roku_app_id": "2213"
+    },
+    {
+     "name": "Discovery+",
+     "id": "discovery_plus_app",
+     "roku_app_id": "413340"
+    }
   ]
 }

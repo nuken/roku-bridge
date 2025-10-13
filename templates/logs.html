@@ -32,14 +32,13 @@
 
         async function fetchLogs() {
             try {
-                const response = await fetch('/logs/content');
+                const response = await fetch(window.location.origin + '/logs/content');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const logText = await response.text();
                 if (logContainer.textContent !== logText) {
                     logContainer.textContent = logText;
-                    // Auto-scroll to the bottom only if the user hasn't scrolled up
                     if (logContainer.scrollHeight - logContainer.scrollTop <= logContainer.clientHeight + 20) {
                         logContainer.scrollTop = logContainer.scrollHeight;
                     }
@@ -52,7 +51,6 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             fetchLogs();
-            // Refresh logs every 3 seconds
             setInterval(fetchLogs, 3000);
         });
     </script>
