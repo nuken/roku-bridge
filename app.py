@@ -305,27 +305,15 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
             search_params['season_number'] = int(season)
             search_params['episode_number'] = int(episode)
 
-        results = os_client.search_subtitles(search_params)
+        results = os_client.search(**search_params)
 
         if not results:
             logging.warning(f"[Subtitles] No subtitles found for '{metadata.get('title')}'.")
             return
 
-        # For simplicity, we'll download the first result. More complex logic could be added here to pick the "best" one.
-        subtitle_id = results[0]['id']
-        download_link_data = os_client.get_download_link(subtitle_id)
-        
-        if not download_link_data or 'link' not in download_link_data:
-            logging.error("[Subtitles] Failed to get subtitle download link.")
-            return
-
-        subtitle_url = download_link_data['link']
-        subtitle_response = requests.get(subtitle_url, timeout=15)
-        subtitle_response.raise_for_status()
-
+        # Download the first result. More complex logic could be added here to pick the "best" one.
         subtitle_filename = os.path.join(os.path.dirname(output_path), f"temp_subtitle.srt")
-        with open(subtitle_filename, 'wb') as f:
-            f.write(subtitle_response.content)
+        os_client.download_and_parse(results[0], destination=subtitle_filename)
         
         logging.info(f"[Subtitles] Subtitle file downloaded successfully to {subtitle_filename}.")
 
