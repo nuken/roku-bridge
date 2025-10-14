@@ -47,8 +47,6 @@ The easiest way to run the application is with Docker Compose.
         volumes:
           - roku-bridge-config:/app/config
           - ./recordings:/app/recordings
-        environment:
-          - ENABLE_DEBUG_LOGGING=true
         restart: unless-stopped
 
     volumes:
