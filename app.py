@@ -14,7 +14,6 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
 from werkzeug.utils import secure_filename
-from opensubtitlescom import OpenSubtitles
 
 # --- Import Plugin System ---
 from plugins import discovered_plugins
@@ -22,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "5.1.0" # Version updated for new feature
+APP_VERSION = "5.0.4"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -60,7 +59,6 @@ ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00' + b'\xff' * 175
 TMDB_API_KEY = ''
-OPENSUBTITLES_SETTINGS = {}
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
@@ -82,13 +80,10 @@ executor = ThreadPoolExecutor(max_workers=10)
 # --- Core Application Logic ---
 
 def load_config():
-    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY, OPENSUBTITLES_SETTINGS
+    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY
     default_config = {
         "tuners": [], "channels": [], "epg_channels": [],
-        "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "",
-        "opensubtitles_settings": {
-            "api_key": "", "username": "", "password": "", "language": "en"
-        }
+        "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""
     }
     
     if not os.path.exists(CONFIG_FILE_PATH):
@@ -110,17 +105,6 @@ def load_config():
                 config_data[key] = default_value
                 config_updated = True
                 logging.info(f"Adding missing required field '{key}' to the configuration.")
-        
-        # --- START: Gracefully handle opensubtitles_settings ---
-        if 'opensubtitles_settings' not in config_data or not isinstance(config_data['opensubtitles_settings'], dict):
-             config_data['opensubtitles_settings'] = default_config['opensubtitles_settings']
-             config_updated = True
-        else:
-             for sub_key, sub_default in default_config['opensubtitles_settings'].items():
-                 if sub_key not in config_data['opensubtitles_settings']:
-                     config_data['opensubtitles_settings'][sub_key] = sub_default
-                     config_updated = True
-        # --- END: Gracefully handle opensubtitles_settings ---
 
         if config_updated:
             with open(CONFIG_FILE_PATH, 'w') as f:
@@ -135,15 +119,11 @@ def load_config():
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
         ONDEMAND_SETTINGS = config_data.get('ondemand_settings', {})
         TMDB_API_KEY = config_data.get('tmdb_api_key', '')
-        OPENSUBTITLES_SETTINGS = config_data.get('opensubtitles_settings', {})
         
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
         if TMDB_API_KEY:
             logging.info("TMDb API Key is configured.")
-        if OPENSUBTITLES_SETTINGS.get('api_key'):
-            logging.info("OpenSubtitles Integration is configured.")
-
 
     except Exception as e:
         logging.error(f"Error loading config: {e}")
@@ -274,100 +254,8 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-# --- START OF SUBTITLE FUNCTION ---
-def download_and_embed_subtitles(output_path, metadata, content_type):
-    if not all(OPENSUBTITLES_SETTINGS.get(k) for k in ['api_key', 'username', 'password']):
-        logging.info("[Subtitles] OpenSubtitles credentials are not fully configured. Skipping subtitle search.")
-        return
-
-    tmdb_id = metadata.get('tmdb_id')
-    if not tmdb_id:
-        logging.warning(f"[Subtitles] No TMDb ID found for '{metadata.get('title')}'. Cannot search for subtitles.")
-        return
-
-    logging.info(f"[Subtitles] Starting subtitle search for '{metadata.get('title')}' (TMDb ID: {tmdb_id}).")
-
-    try:
-        os_client = OpenSubtitles(f"Roku-Bridge v{APP_VERSION}", OPENSUBTITLES_SETTINGS['api_key'])
-        os_client.login(OPENSUBTITLES_SETTINGS['username'], OPENSUBTITLES_SETTINGS['password'])
-
-        search_params = {
-            'tmdb_id': tmdb_id,
-            'languages': OPENSUBTITLES_SETTINGS.get('language', 'en')
-        }
-
-        if content_type == 'show':
-            season = metadata.get('season')
-            episode = metadata.get('episode')
-            if not season or not episode:
-                logging.warning("[Subtitles] TV show is missing season or episode number. Cannot search for subtitles.")
-                return
-            search_params['season_number'] = int(season)
-            search_params['episode_number'] = int(episode)
-
-        results = os_client.search(**search_params)
-
-        if not results:
-            logging.warning(f"[Subtitles] No subtitles found for '{metadata.get('title')}'.")
-            return
-
-        subtitle_filename = os.path.join(os.path.dirname(output_path), f"temp_subtitle.srt")
-        synced_subtitle_filename = os.path.join(os.path.dirname(output_path), f"synced_temp_subtitle.srt")
-        subtitle_content = os_client.download_and_parse(results.data[0])
-
-        # Manually build the SRT content
-        srt_formatted_content = ""
-        for sub in subtitle_content:
-            srt_formatted_content += f"{sub.index}\n"
-            srt_formatted_content += f"{sub.start} --> {sub.end}\n"
-            srt_formatted_content += f"{sub.content}\n\n"
-
-        with open(subtitle_filename, 'w', encoding='utf-8') as f:
-            f.write(srt_formatted_content)
-
-        logging.info(f"[Subtitles] Subtitle file downloaded successfully to {subtitle_filename}.")
-
-        # --- Sync subtitles using ffsubsync ---
-        logging.info(f"[Subtitles] Attempting to synchronize subtitles for {output_path}.")
-        sync_command = [
-            'ffsubsync', output_path,
-            '-i', subtitle_filename,
-            '-o', synced_subtitle_filename
-        ]
-        subprocess.run(sync_command, check=True)
-        logging.info(f"[Subtitles] Subtitles synchronized successfully to {synced_subtitle_filename}.")
-
-
-        # --- Embed subtitle using ffmpeg ---
-        temp_output_path = output_path + ".tmp.mkv"
-
-        mux_command = [
-            'ffmpeg', '-y', '-i', output_path, '-i', synced_subtitle_filename,
-            '-c', 'copy', '-map', '0', '-map', '1',
-            '-metadata:s:s:0', f"language={OPENSUBTITLES_SETTINGS.get('language', 'en')}",
-            '-metadata:s:s:0', f"title={OPENSUBTITLES_SETTINGS.get('language', 'en').capitalize()}",
-            '-disposition:s:0', 'default',
-            '-f', 'matroska', '-loglevel', 'warning', temp_output_path
-        ]
-
-        subprocess.run(mux_command, check=True)
-
-        os.replace(temp_output_path, output_path)
-        logging.info(f"[Subtitles] Subtitle successfully embedded into {output_path}.")
-
-    except Exception as e:
-        logging.error(f"[Subtitles] An error occurred during the subtitle process: {e}")
-    finally:
-        # --- Cleanup ---
-        if 'subtitle_filename' in locals() and os.path.exists(subtitle_filename):
-            os.remove(subtitle_filename)
-        if 'synced_subtitle_filename' in locals() and os.path.exists(synced_subtitle_filename):
-            os.remove(synced_subtitle_filename)
-        logging.info(f"[Subtitles] Cleaned up temporary subtitle files.")
-# --- END OF SUBTITLE FUNCTION ---
-
-
-def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, output_path, metadata, content_type):
+# --- START OF MODIFIED WATCHER FUNCTION ---
+def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
     """
     This function runs in a background thread to monitor the status of a recording.
     It periodically queries the Roku to see if the content has finished playing.
@@ -377,23 +265,26 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, outp
     initial_duration_ms = None
     last_position_ms = 0
     
-    POLL_INTERVAL = 15
-    PAUSE_TIMEOUT = 900
-    POSITION_RESET_THRESHOLD = 30000
+    POLL_INTERVAL = 15  # Check every 15 seconds
+    PAUSE_TIMEOUT = 900 # 15 minutes
+    POSITION_RESET_THRESHOLD = 30000 # 30 seconds
 
     logging.info(f"[Recording Watcher] Monitoring recording on tuner {tuner_ip}.")
 
     while True:
         time.sleep(POLL_INTERVAL)
 
+        # Failsafe: If the watcher runs for longer than the max duration, stop it.
         if time.time() - start_time > max_duration_seconds:
             logging.warning(f"[Recording Watcher] Max duration failsafe reached for {tuner_ip}. Stopping recording.")
             break
 
+        # Check if the ffmpeg process is still running. If not, exit.
         if ffmpeg_process.poll() is not None:
             logging.info(f"[Recording Watcher] FFmpeg process for {tuner_ip} ended. Exiting watcher.")
             break
 
+        # --- START of retry logic ---
         retries = 0
         media_player_xml = None
         while retries < 2:
@@ -401,26 +292,29 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, outp
                 response = requests.get(f"http://{tuner_ip}:8060/query/media-player", timeout=3)
                 response.raise_for_status()
                 media_player_xml = response.content
-                break
+                break  # Success, exit retry loop
             except requests.exceptions.RequestException as e:
                 retries += 1
                 if retries < 2:
                     logging.warning(f"[Recording Watcher] Could not connect to Roku {tuner_ip} to check status. Retrying... ({retries}/1)")
-                    time.sleep(5)
+                    time.sleep(5)  # Wait 5 seconds before retrying
                 else:
                     logging.warning(f"[Recording Watcher] Could not connect to Roku {tuner_ip} after multiple attempts. Will rely on failsafe timer. Error: {e}")
+        # --- END of retry logic ---
 
         if not media_player_xml:
-            continue
+            continue # Go to next poll interval if we couldn't get the status
 
         try:
             root = ET.fromstring(media_player_xml)
             player_state = root.get('state')
             
+            # Condition 1: Player is closed or stopped
             if player_state in ['close', 'stop']:
                 logging.info(f"[Recording Watcher] Player state is '{player_state}'. Stopping recording for {tuner_ip}.")
                 break
             
+            # --- Start of new state-aware logic ---
             position_str = root.findtext('.//position')
             duration_str = root.findtext('.//duration')
 
@@ -429,14 +323,17 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, outp
                     current_position_ms = int(position_str.replace(' ms', ''))
                     current_duration_ms = int(duration_str.replace(' ms', ''))
 
+                    # Capture the initial duration on the first valid poll
                     if initial_duration_ms is None and current_duration_ms > 0:
                         initial_duration_ms = current_duration_ms
                         logging.info(f"[Recording Watcher] Captured initial duration for {tuner_ip}: {initial_duration_ms / 1000 / 60:.2f} minutes.")
 
+                    # Condition 2: Auto-play detected (position resets)
                     if current_position_ms < last_position_ms - POSITION_RESET_THRESHOLD:
                         logging.info(f"[Recording Watcher] Position reset detected on {tuner_ip}. Assuming auto-play and stopping recording.")
                         break
                     
+                    # Condition 3: Content finished playing against the *initial* duration
                     if initial_duration_ms and current_position_ms >= initial_duration_ms - (POLL_INTERVAL * 1000):
                         logging.info(f"[Recording Watcher] Content finished playing on {tuner_ip}. Stopping recording.")
                         break
@@ -444,8 +341,10 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, outp
                     last_position_ms = current_position_ms
 
                 except (ValueError, TypeError):
-                    pass
+                    pass # Could not parse position/duration, rely on failsafe timer
+            # --- End of new state-aware logic ---
 
+            # Condition 4: Handle "Are you still watching?" prompts
             if player_state == 'pause':
                 if pause_start_time is None:
                     pause_start_time = time.time()
@@ -458,6 +357,7 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, outp
         except ET.ParseError:
              logging.warning(f"[Recording Watcher] Failed to parse XML from Roku {tuner_ip}. Will rely on failsafe timer.")
 
+    # --- Cleanup ---
     if ffmpeg_process.poll() is None:
         logging.info(f"[Recording Watcher] Terminating ffmpeg process for {tuner_ip}.")
         ffmpeg_process.terminate()
@@ -467,11 +367,8 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, outp
             logging.warning(f"[Recording Watcher] FFmpeg process for {tuner_ip} did not terminate gracefully. Killing.")
             ffmpeg_process.kill()
             
-    # --- START: Trigger subtitle download post-recording ---
-    executor.submit(download_and_embed_subtitles, output_path, metadata, content_type)
-    # --- END: Trigger subtitle download post-recording ---
-
     release_tuner(tuner_ip)
+# --- END OF MODIFIED WATCHER FUNCTION ---
 
 def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
@@ -480,6 +377,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         return
 
     encoder_url = tuner['encoder_url']
+    # Add a 5-minute buffer to the user-provided duration to act as a failsafe
     duration_seconds = (duration_minutes + 5) * 60
     
     title = metadata.get('title', 'On-Demand Recording')
@@ -519,6 +417,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         filename = f"{safe_title} ({year})"
         output_path = os.path.join(movie_folder, f"{filename}.mkv")
     
+    # The -t duration flag is removed, as the watcher will handle stopping.
     command = [
         'ffmpeg', '-y', '-i', encoder_url,
         '-c', 'copy', '-map', '0',
@@ -543,7 +442,8 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         RECORDING_PROCESSES[tuner_ip] = process
         logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
         
-        watcher_thread = threading.Thread(target=watch_recording_session, args=(tuner_ip, process, duration_seconds, output_path, metadata, content_type))
+        # Start the new watcher thread
+        watcher_thread = threading.Thread(target=watch_recording_session, args=(tuner_ip, process, duration_seconds))
         watcher_thread.daemon = True
         watcher_thread.start()
         
@@ -580,9 +480,13 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, co
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for local recording.")
             
+            # --- START OF NEW CODE ---
+            # Send the "Play" command to start the content from its paused state
             logging.info(f"[Recording] Sending 'Play' command to {tuner_ip} to begin recording.")
             send_key_sequence(tuner_ip, ["Play"])
+            # Give the stream a moment to start before ffmpeg connects
             time.sleep(1) 
+            # --- END OF NEW CODE ---
 
             start_local_recording(tuner_ip, duration, metadata, content_type)
             session['is_recording_queued'] = True
@@ -643,17 +547,28 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
         stream_url = f"http://{request.host}/stream/{channel['id']}"
         extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
         
+        # --- START OF FIX ---
+        # Expanded the tags dictionary to include all possible custom EPG fields.
         tags = {
-            "tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo",
-            "tvc-guide-stationid": "tvc_guide_stationid", "tvc-guide-art": "tvc-guide-art",
-            "tvc-guide-title": "tvc-guide-title", "tvc-guide-description": "tvc-guide-description",
-            "tvc-guide-tags": "tvc-guide-tags", "tvc-guide-genres": "tvc-guide-genres",
-            "tvc-guide-categories": "tvc-guide-categories", "tvc-guide-placeholders": "tvc-guide-placeholders",
-            "tvc-stream-vcodec": "tvc-stream-vcodec", "tvc-stream-acodec": "tvc-stream-acodec"
+            "tvg-name": "name",
+            "channel-number": "channel-number",
+            "tvg-logo": "tvg-logo",
+            "tvc-guide-stationid": "tvc_guide_stationid",
+            "tvc-guide-art": "tvc-guide-art",
+            "tvc-guide-title": "tvc-guide-title",
+            "tvc-guide-description": "tvc-guide-description",
+            "tvc-guide-tags": "tvc-guide-tags",
+            "tvc-guide-genres": "tvc-guide-genres",
+            "tvc-guide-categories": "tvc-guide-categories",
+            "tvc-guide-placeholders": "tvc-guide-placeholders",
+            "tvc-stream-vcodec": "tvc-stream-vcodec",
+            "tvc-stream-acodec": "tvc-stream-acodec"
         }
+        # --- END OF FIX ---
 
         for tag, key in tags.items():
             if key in channel and channel[key]:
+                # For tags that can be comma-separated lists, ensure they are formatted correctly.
                 if isinstance(channel[key], list):
                     extinf_line += f' {tag}="{",".join(map(str, channel[key]))}"'
                 else:
@@ -737,7 +652,7 @@ def api_config():
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
             return jsonify(config_data)
         except FileNotFoundError:
-            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "opensubtitles_settings": { "api_key": "", "username": "", "password": "", "language": "en" }})
+            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""})
         except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])
@@ -996,40 +911,6 @@ def api_metadata_details():
         return jsonify({"status": "success", "metadata": metadata})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
-# --- START: New endpoint for episode details ---
-@app.route('/api/metadata/episode_details', methods=['POST'])
-def api_metadata_episode_details():
-    if not TMDB_API_KEY:
-        return jsonify({"status": "error", "message": "TMDb API key is not configured."}), 400
-    
-    data = request.get_json()
-    show_id = data.get('id')
-    season = data.get('season')
-    episode = data.get('episode')
-
-    if not all([show_id, season, episode]):
-        return jsonify({"status": "error", "message": "Show ID, season, and episode are required."}), 400
-
-    try:
-        url = f"https://api.themoviedb.org/3/tv/{show_id}/season/{season}/episode/{episode}?api_key={TMDB_API_KEY}"
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        details = response.json()
-        
-        metadata = {
-            "subtitle": details.get('name', ''),
-            "description": details.get('overview', '')
-        }
-        return jsonify({"status": "success", "metadata": metadata})
-    except requests.exceptions.HTTPError as e:
-         if e.response.status_code == 404:
-             return jsonify({"status": "error", "message": "Episode not found."}), 404
-         return jsonify({"status": "error", "message": str(e)}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-# --- END: New endpoint for episode details ---
-
 
 if __name__ != '__main__':
     load_config()

@@ -169,16 +169,15 @@
                         <input type="text" id="title-input" placeholder="Enter title to search online">
                     </div>
                     <input type="hidden" id="year-input">
-                    <input type="hidden" id="tmdb-id-input">
                     <div class="form-group" id="season-episode-fields" style="display: none;">
                         <div style="display: flex; gap: 10px;">
                             <div style="flex-grow: 1;">
                                 <label for="season-input">Season</label>
-                                <input type="number" id="season-input" min="1" value="1" onchange="getTmdbEpisodeDetails()">
+                                <input type="number" id="season-input" min="1" value="1">
                             </div>
                             <div style="flex-grow: 1;">
                                 <label for="episode-input">Episode</label>
-                                <input type="number" id="episode-input" min="1" value="1" onchange="getTmdbEpisodeDetails()">
+                                <input type="number" id="episode-input" min="1" value="1">
                             </div>
                         </div>
                     </div>
@@ -409,7 +408,6 @@
                  document.getElementById('subtitle-input').value = '';
                  document.getElementById('description-input').value = '';
                  document.getElementById('image-input').value = '';
-                 document.getElementById('tmdb-id-input').value = '';
             }
             try {
                 await fetch('/api/pretune/stop', {
@@ -504,7 +502,11 @@
                     data.results.forEach(item => {
                         const resultDiv = document.createElement('div');
                         resultDiv.className = 'search-result';
-                        resultDiv.onclick = () => selectTmdbResult(item.id, item.type, item.title, item.year);
+                        resultDiv.onclick = () => {
+                            document.getElementById('title-input').value = item.title;
+                            document.getElementById('year-input').value = item.year;
+                            getTmdbDetails(item.id, item.type);
+                        };
                         resultDiv.innerHTML = `
                             <img src="${item.poster || 'https://via.placeholder.com/40x60'}" alt="Poster">
                             <div class="search-result-info">
@@ -518,19 +520,6 @@
                     showNotification('No results found online.', 'warn');
                 }
             } catch (error) { showNotification(`Search failed: ${error.message}`, 'error'); }
-        }
-
-        function selectTmdbResult(id, type, title, year) {
-            document.getElementById('title-input').value = title;
-            document.getElementById('year-input').value = year;
-            document.getElementById('tmdb-id-input').value = id;
-            document.getElementById('content-type-select').value = type === 'tv' ? 'show' : 'movie';
-            toggleTvShowFields();
-            getTmdbDetails(id, type);
-            if(type === 'tv') {
-                getTmdbEpisodeDetails();
-            }
-            closeModal('tmdb-results-modal');
         }
 
         async function getTmdbDetails(id, type) {
@@ -550,39 +539,9 @@
                     }
                     showNotification('Details populated!', 'success');
                 }
+                closeModal('tmdb-results-modal');
             } catch (error) { showNotification(`Failed to get details: ${error.message}`, 'error'); }
         }
-        
-        async function getTmdbEpisodeDetails() {
-            const showId = document.getElementById('tmdb-id-input').value;
-            const season = document.getElementById('season-input').value;
-            const episode = document.getElementById('episode-input').value;
-
-            if (!showId || !season || !episode || document.getElementById('content-type-select').value !== 'show') {
-                return;
-            }
-
-            try {
-                const response = await fetch('/api/metadata/episode_details', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ id: showId, season: season, episode: episode })
-                });
-                const data = await response.json();
-                if (data.status === 'error') {
-                    showNotification(`Episode Info: ${data.message}`, 'warn');
-                    return;
-                }
-                
-                if (data.metadata) {
-                    document.getElementById('subtitle-input').value = data.metadata.subtitle || '';
-                    document.getElementById('description-input').value = data.metadata.description || '';
-                    showNotification('Episode details updated!', 'success');
-                }
-            } catch (error) {
-                showNotification(`Failed to get episode details: ${error.message}`, 'error');
-            }
-        }
-
 
         async function startStream() {
             if (!activeTunerIp) { showNotification('Please start a session first.', 'error'); return; }
@@ -599,8 +558,7 @@
                 image: document.getElementById('image-input').value,
                 season: document.getElementById('season-input').value,
                 episode: document.getElementById('episode-input').value,
-                year: document.getElementById('year-input').value,
-                tmdb_id: document.getElementById('tmdb-id-input').value
+                year: document.getElementById('year-input').value
             };
             const contentType = document.getElementById('content-type-select').value;
 
