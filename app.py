@@ -288,7 +288,7 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
     logging.info(f"[Subtitles] Starting subtitle search for '{metadata.get('title')}' (TMDb ID: {tmdb_id}).")
 
     try:
-        os_client = OpenSubtitles(api_key=OPENSUBTITLES_SETTINGS['api_key'])
+        os_client = OpenSubtitles(f"Roku-Bridge v{APP_VERSION}", OPENSUBTITLES_SETTINGS['api_key'])
         os_client.login(OPENSUBTITLES_SETTINGS['username'], OPENSUBTITLES_SETTINGS['password'])
         
         search_params = {
