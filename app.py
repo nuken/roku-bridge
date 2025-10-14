@@ -290,12 +290,12 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
     try:
         os_client = OpenSubtitles(f"Roku-Bridge v{APP_VERSION}", OPENSUBTITLES_SETTINGS['api_key'])
         os_client.login(OPENSUBTITLES_SETTINGS['username'], OPENSUBTITLES_SETTINGS['password'])
-        
+
         search_params = {
             'tmdb_id': tmdb_id,
             'languages': OPENSUBTITLES_SETTINGS.get('language', 'en')
         }
-        
+
         if content_type == 'show':
             season = metadata.get('season')
             episode = metadata.get('episode')
@@ -311,17 +311,24 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
             logging.warning(f"[Subtitles] No subtitles found for '{metadata.get('title')}'.")
             return
 
-        # Download the first result. More complex logic could be added here to pick the "best" one.
         subtitle_filename = os.path.join(os.path.dirname(output_path), f"temp_subtitle.srt")
         subtitle_content = os_client.download_and_parse(results.data[0])
+
+        # Manually build the SRT content
+        srt_formatted_content = ""
+        for sub in subtitle_content:
+            srt_formatted_content += f"{sub.index}\n"
+            srt_formatted_content += f"{sub.start} --> {sub.end}\n"
+            srt_formatted_content += f"{sub.content}\n\n"
+
         with open(subtitle_filename, 'w', encoding='utf-8') as f:
-            f.write("\n".join(map(str, subtitle_content)))
-        
+            f.write(srt_formatted_content)
+
         logging.info(f"[Subtitles] Subtitle file downloaded successfully to {subtitle_filename}.")
 
         # --- Embed subtitle using ffmpeg ---
         temp_output_path = output_path + ".tmp.mkv"
-        
+
         mux_command = [
             'ffmpeg', '-y', '-i', output_path, '-i', subtitle_filename,
             '-c', 'copy', '-map', '0', '-map', '1',
@@ -330,7 +337,7 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
             '-disposition:s:0', 'default',
             '-f', 'matroska', '-loglevel', 'warning', temp_output_path
         ]
-        
+
         subprocess.run(mux_command, check=True)
 
         os.replace(temp_output_path, output_path)
