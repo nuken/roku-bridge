@@ -312,6 +312,7 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
             return
 
         subtitle_filename = os.path.join(os.path.dirname(output_path), f"temp_subtitle.srt")
+        synced_subtitle_filename = os.path.join(os.path.dirname(output_path), f"synced_temp_subtitle.srt")
         subtitle_content = os_client.download_and_parse(results.data[0])
 
         # Manually build the SRT content
@@ -326,11 +327,22 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
 
         logging.info(f"[Subtitles] Subtitle file downloaded successfully to {subtitle_filename}.")
 
+        # --- Sync subtitles using ffsubsync ---
+        logging.info(f"[Subtitles] Attempting to synchronize subtitles for {output_path}.")
+        sync_command = [
+            'ffsubsync', output_path,
+            '-i', subtitle_filename,
+            '-o', synced_subtitle_filename
+        ]
+        subprocess.run(sync_command, check=True)
+        logging.info(f"[Subtitles] Subtitles synchronized successfully to {synced_subtitle_filename}.")
+
+
         # --- Embed subtitle using ffmpeg ---
         temp_output_path = output_path + ".tmp.mkv"
 
         mux_command = [
-            'ffmpeg', '-y', '-i', output_path, '-i', subtitle_filename,
+            'ffmpeg', '-y', '-i', output_path, '-i', synced_subtitle_filename,
             '-c', 'copy', '-map', '0', '-map', '1',
             '-metadata:s:s:0', f"language={OPENSUBTITLES_SETTINGS.get('language', 'en')}",
             '-metadata:s:s:0', f"title={OPENSUBTITLES_SETTINGS.get('language', 'en').capitalize()}",
@@ -349,7 +361,9 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
         # --- Cleanup ---
         if 'subtitle_filename' in locals() and os.path.exists(subtitle_filename):
             os.remove(subtitle_filename)
-            logging.info(f"[Subtitles] Cleaned up temporary subtitle file.")
+        if 'synced_subtitle_filename' in locals() and os.path.exists(synced_subtitle_filename):
+            os.remove(synced_subtitle_filename)
+        logging.info(f"[Subtitles] Cleaned up temporary subtitle files.")
 # --- END OF SUBTITLE FUNCTION ---
 
 

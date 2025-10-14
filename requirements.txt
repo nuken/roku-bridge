@@ -5,3 +5,4 @@ gevent
 httpx
 lxml
 opensubtitlescom
+ffsubsync
