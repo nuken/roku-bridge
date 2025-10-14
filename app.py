@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "5.0.4"
+APP_VERSION = "5.1.0" # Version updated for new feature
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -254,7 +254,6 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-# --- START OF MODIFIED WATCHER FUNCTION ---
 def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
     """
     This function runs in a background thread to monitor the status of a recording.
@@ -265,26 +264,23 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
     initial_duration_ms = None
     last_position_ms = 0
     
-    POLL_INTERVAL = 15  # Check every 15 seconds
-    PAUSE_TIMEOUT = 900 # 15 minutes
-    POSITION_RESET_THRESHOLD = 30000 # 30 seconds
+    POLL_INTERVAL = 15
+    PAUSE_TIMEOUT = 900
+    POSITION_RESET_THRESHOLD = 30000
 
     logging.info(f"[Recording Watcher] Monitoring recording on tuner {tuner_ip}.")
 
     while True:
         time.sleep(POLL_INTERVAL)
 
-        # Failsafe: If the watcher runs for longer than the max duration, stop it.
         if time.time() - start_time > max_duration_seconds:
             logging.warning(f"[Recording Watcher] Max duration failsafe reached for {tuner_ip}. Stopping recording.")
             break
 
-        # Check if the ffmpeg process is still running. If not, exit.
         if ffmpeg_process.poll() is not None:
             logging.info(f"[Recording Watcher] FFmpeg process for {tuner_ip} ended. Exiting watcher.")
             break
 
-        # --- START of retry logic ---
         retries = 0
         media_player_xml = None
         while retries < 2:
@@ -292,29 +288,26 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
                 response = requests.get(f"http://{tuner_ip}:8060/query/media-player", timeout=3)
                 response.raise_for_status()
                 media_player_xml = response.content
-                break  # Success, exit retry loop
+                break
             except requests.exceptions.RequestException as e:
                 retries += 1
                 if retries < 2:
                     logging.warning(f"[Recording Watcher] Could not connect to Roku {tuner_ip} to check status. Retrying... ({retries}/1)")
-                    time.sleep(5)  # Wait 5 seconds before retrying
+                    time.sleep(5)
                 else:
                     logging.warning(f"[Recording Watcher] Could not connect to Roku {tuner_ip} after multiple attempts. Will rely on failsafe timer. Error: {e}")
-        # --- END of retry logic ---
 
         if not media_player_xml:
-            continue # Go to next poll interval if we couldn't get the status
+            continue
 
         try:
             root = ET.fromstring(media_player_xml)
             player_state = root.get('state')
             
-            # Condition 1: Player is closed or stopped
             if player_state in ['close', 'stop']:
                 logging.info(f"[Recording Watcher] Player state is '{player_state}'. Stopping recording for {tuner_ip}.")
                 break
             
-            # --- Start of new state-aware logic ---
             position_str = root.findtext('.//position')
             duration_str = root.findtext('.//duration')
 
@@ -323,17 +316,14 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
                     current_position_ms = int(position_str.replace(' ms', ''))
                     current_duration_ms = int(duration_str.replace(' ms', ''))
 
-                    # Capture the initial duration on the first valid poll
                     if initial_duration_ms is None and current_duration_ms > 0:
                         initial_duration_ms = current_duration_ms
                         logging.info(f"[Recording Watcher] Captured initial duration for {tuner_ip}: {initial_duration_ms / 1000 / 60:.2f} minutes.")
 
-                    # Condition 2: Auto-play detected (position resets)
                     if current_position_ms < last_position_ms - POSITION_RESET_THRESHOLD:
                         logging.info(f"[Recording Watcher] Position reset detected on {tuner_ip}. Assuming auto-play and stopping recording.")
                         break
                     
-                    # Condition 3: Content finished playing against the *initial* duration
                     if initial_duration_ms and current_position_ms >= initial_duration_ms - (POLL_INTERVAL * 1000):
                         logging.info(f"[Recording Watcher] Content finished playing on {tuner_ip}. Stopping recording.")
                         break
@@ -341,10 +331,8 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
                     last_position_ms = current_position_ms
 
                 except (ValueError, TypeError):
-                    pass # Could not parse position/duration, rely on failsafe timer
-            # --- End of new state-aware logic ---
+                    pass
 
-            # Condition 4: Handle "Are you still watching?" prompts
             if player_state == 'pause':
                 if pause_start_time is None:
                     pause_start_time = time.time()
@@ -357,7 +345,6 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
         except ET.ParseError:
              logging.warning(f"[Recording Watcher] Failed to parse XML from Roku {tuner_ip}. Will rely on failsafe timer.")
 
-    # --- Cleanup ---
     if ffmpeg_process.poll() is None:
         logging.info(f"[Recording Watcher] Terminating ffmpeg process for {tuner_ip}.")
         ffmpeg_process.terminate()
@@ -368,7 +355,6 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
             ffmpeg_process.kill()
             
     release_tuner(tuner_ip)
-# --- END OF MODIFIED WATCHER FUNCTION ---
 
 def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
     tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
@@ -377,7 +363,6 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         return
 
     encoder_url = tuner['encoder_url']
-    # Add a 5-minute buffer to the user-provided duration to act as a failsafe
     duration_seconds = (duration_minutes + 5) * 60
     
     title = metadata.get('title', 'On-Demand Recording')
@@ -417,7 +402,6 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         filename = f"{safe_title} ({year})"
         output_path = os.path.join(movie_folder, f"{filename}.mkv")
     
-    # The -t duration flag is removed, as the watcher will handle stopping.
     command = [
         'ffmpeg', '-y', '-i', encoder_url,
         '-c', 'copy', '-map', '0',
@@ -442,7 +426,6 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         RECORDING_PROCESSES[tuner_ip] = process
         logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
         
-        # Start the new watcher thread
         watcher_thread = threading.Thread(target=watch_recording_session, args=(tuner_ip, process, duration_seconds))
         watcher_thread.daemon = True
         watcher_thread.start()
@@ -480,13 +463,9 @@ def commit_preview_session(tuner_ip, record=False, duration=0, metadata=None, co
         if record and duration > 0:
             logging.info(f"Committing tuner {tuner_name} for local recording.")
             
-            # --- START OF NEW CODE ---
-            # Send the "Play" command to start the content from its paused state
             logging.info(f"[Recording] Sending 'Play' command to {tuner_ip} to begin recording.")
             send_key_sequence(tuner_ip, ["Play"])
-            # Give the stream a moment to start before ffmpeg connects
             time.sleep(1) 
-            # --- END OF NEW CODE ---
 
             start_local_recording(tuner_ip, duration, metadata, content_type)
             session['is_recording_queued'] = True
@@ -547,28 +526,17 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
         stream_url = f"http://{request.host}/stream/{channel['id']}"
         extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
         
-        # --- START OF FIX ---
-        # Expanded the tags dictionary to include all possible custom EPG fields.
         tags = {
-            "tvg-name": "name",
-            "channel-number": "channel-number",
-            "tvg-logo": "tvg-logo",
-            "tvc-guide-stationid": "tvc_guide_stationid",
-            "tvc-guide-art": "tvc-guide-art",
-            "tvc-guide-title": "tvc-guide-title",
-            "tvc-guide-description": "tvc-guide-description",
-            "tvc-guide-tags": "tvc-guide-tags",
-            "tvc-guide-genres": "tvc-guide-genres",
-            "tvc-guide-categories": "tvc-guide-categories",
-            "tvc-guide-placeholders": "tvc-guide-placeholders",
-            "tvc-stream-vcodec": "tvc-stream-vcodec",
-            "tvc-stream-acodec": "tvc-stream-acodec"
+            "tvg-name": "name", "channel-number": "channel-number", "tvg-logo": "tvg-logo",
+            "tvc-guide-stationid": "tvc_guide_stationid", "tvc-guide-art": "tvc-guide-art",
+            "tvc-guide-title": "tvc-guide-title", "tvc-guide-description": "tvc-guide-description",
+            "tvc-guide-tags": "tvc-guide-tags", "tvc-guide-genres": "tvc-guide-genres",
+            "tvc-guide-categories": "tvc-guide-categories", "tvc-guide-placeholders": "tvc-guide-placeholders",
+            "tvc-stream-vcodec": "tvc-stream-vcodec", "tvc-stream-acodec": "tvc-stream-acodec"
         }
-        # --- END OF FIX ---
 
         for tag, key in tags.items():
             if key in channel and channel[key]:
-                # For tags that can be comma-separated lists, ensure they are formatted correctly.
                 if isinstance(channel[key], list):
                     extinf_line += f' {tag}="{",".join(map(str, channel[key]))}"'
                 else:
@@ -911,6 +879,40 @@ def api_metadata_details():
         return jsonify({"status": "success", "metadata": metadata})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+# --- START: New endpoint for episode details ---
+@app.route('/api/metadata/episode_details', methods=['POST'])
+def api_metadata_episode_details():
+    if not TMDB_API_KEY:
+        return jsonify({"status": "error", "message": "TMDb API key is not configured."}), 400
+    
+    data = request.get_json()
+    show_id = data.get('id')
+    season = data.get('season')
+    episode = data.get('episode')
+
+    if not all([show_id, season, episode]):
+        return jsonify({"status": "error", "message": "Show ID, season, and episode are required."}), 400
+
+    try:
+        url = f"https://api.themoviedb.org/3/tv/{show_id}/season/{season}/episode/{episode}?api_key={TMDB_API_KEY}"
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        details = response.json()
+        
+        metadata = {
+            "subtitle": details.get('name', ''),
+            "description": details.get('overview', '')
+        }
+        return jsonify({"status": "success", "metadata": metadata})
+    except requests.exceptions.HTTPError as e:
+         if e.response.status_code == 404:
+             return jsonify({"status": "error", "message": "Episode not found."}), 404
+         return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+# --- END: New endpoint for episode details ---
+
 
 if __name__ != '__main__':
     load_config()
