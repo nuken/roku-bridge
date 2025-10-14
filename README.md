@@ -1,4 +1,3 @@
-
 # **Roku Channels Bridge**
 
 **Release: Beta 5.0.4**
@@ -19,6 +18,7 @@ This setup allows you to use streaming service channels (like those from YouTube
   * **Web-Based Management:** A built-in **Status Page** to monitor your devices and manage your entire configuration with an intuitive UI.
   * **Remote Control:** A web-based **Remote** to control any of your configured Roku devices from a browser on your phone, tablet, or computer.
   * **Metadata Integration**: Automatically searches TMDb, embeds metadata (title, summary) into recorded files, and saves artwork for seamless integration with media servers like Plex, Jellyfin, or Channels DVR.
+  * **Subtitle Integration**: Automatically searches for and embeds subtitles from OpenSubtitles.com into your recordings.
   * **Flexible Streaming Modes:** Choose between `proxy`, `remux`, or an efficient audio-only `reencode` mode to ensure stream stability with minimal CPU usage. This can be set per-tuner.
   * **Hardware Acceleration:** Automatically detects and uses NVIDIA (NVENC) or Intel (QSV) GPUs for video processing if available.
   * **Persistent Configuration:** Uses a Docker volume to safely store your configuration, so it persists through container updates and restarts.
@@ -64,11 +64,23 @@ The easiest way to run the application is with Docker Compose.
 Once the container is running, open your web browser and navigate to `http://<your-ip>:5006/status` to access the configuration panel.
 
   * **Tuners**: Add each of your Roku devices by providing a name, its IP address, and the URL of its corresponding HDMI encoder stream.
-  * **Integrations**: To enable automatic metadata and artwork lookup for your recordings, you need a free API key from **The Movie Database (TMDb)**.
-    1.  Register for a free account at [https://www.themoviedb.org/signup](https://www.themoviedb.org/signup).
-    2.  In your account settings, go to the **API** section and request a key.
-    3.  Copy the **API Key (v3 auth)** and paste it into the "TMDb API Key" field in the Integrations section of the config page.
-    4.  Click **Save All Changes**.
+
+  * **Integrations**: To enable automatic metadata, artwork, and subtitle lookups for your recordings, you will need free API keys.
+
+    1.  **TMDb (for metadata and artwork):**
+
+          * Register for a free account at [https://www.themoviedb.org/signup](https://www.themoviedb.org/signup).
+          * In your account settings, go to the **API** section and request a key.
+          * Copy the **API Key (v3 auth)** and paste it into the "TMDb API Key" field in the Integrations section of the config page.
+
+    2.  **OpenSubtitles.com (for subtitles):**
+
+          * Register for a free account at [https://www.opensubtitles.com/users/sign\_up](https://www.google.com/search?q=https://www.opensubtitles.com/users/sign_up).
+          * Once registered, go to your profile and select **API Consumers**.
+          * Click **Create a new consumer** to generate an API key.
+          * Enter your OpenSubtitles.com **API Key**, **Username**, and **Password** into the corresponding fields in the Integrations section.
+
+    3.  Click **Save All Changes**.
 
 -----
 
