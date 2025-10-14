@@ -326,7 +326,7 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
             'ffmpeg', '-y', '-i', output_path, '-i', subtitle_filename,
             '-c', 'copy', '-map', '0', '-map', '1',
             '-metadata:s:s:0', f"language={OPENSUBTITLES_SETTINGS.get('language', 'en')}",
-            '-metadata:s:s:0', 'title=English', # Can be customized
+            '-metadata:s:s:0', f"title={OPENSUBTITLES_SETTINGS.get('language', 'en').capitalize()}",
             '-disposition:s:0', 'default',
             '-f', 'matroska', '-loglevel', 'warning', temp_output_path
         ]
