@@ -313,7 +313,7 @@ def download_and_embed_subtitles(output_path, metadata, content_type):
 
         # Download the first result. More complex logic could be added here to pick the "best" one.
         subtitle_filename = os.path.join(os.path.dirname(output_path), f"temp_subtitle.srt")
-        os_client.download_and_parse(results[0], destination=subtitle_filename)
+        os_client.download_and_parse(results.data[0], destination=subtitle_filename)
         
         logging.info(f"[Subtitles] Subtitle file downloaded successfully to {subtitle_filename}.")
 
