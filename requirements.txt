@@ -4,3 +4,4 @@ gunicorn
 gevent
 httpx
 lxml
+opensubtitlescom
