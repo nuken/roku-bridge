@@ -31,11 +31,17 @@ The application is distributed as a multi-architecture Docker image, ready to ru
 
 ### 1\. Run with Docker
 
-The easiest way to run the application is with Docker Compose.
+The easiest way to run the application is with Docker Compose. For upgrades, save a config backup.
 
 1.  Create a folder for your project. This folder's location is important, as it's where your recordings will be saved.
 
-2.  Inside that folder, create a file named `docker-compose.yml` and add the following content:
+2.  For first time installs, create the Docker volume manually by running this command in your terminal:
+
+    ```
+    docker volume create roku-bridge-config
+    ```
+   
+3.  Inside that folder, create a file named `docker-compose.yml` and add the following content:
 
     ```yaml
     services:
@@ -51,11 +57,12 @@ The easiest way to run the application is with Docker Compose.
 
     volumes:
       roku-bridge-config:
+        external: true
     ```
 
     **Note:** The `- ./recordings:/app/recordings` line means a `recordings` folder will be created on your host machine in the same directory as your `docker-compose.yml` file.
 
-3.  Open a terminal in your project folder and run: `docker-compose up -d`
+4.  Open a terminal in your project folder and run: `docker-compose up -d`
 
 ### 2\. Configure Your Tuners & Integrations
 
