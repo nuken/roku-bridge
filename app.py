@@ -205,28 +205,42 @@ def execute_tuning_in_background(roku_ip, channel_data):
     try:
         if DEBUG_LOGGING_ENABLED: logging.info(f"Tuning to actual channel {channel_data['name']}...")
         launch_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
-        roku_session.post(launch_url)
+
+        # --- START OF FIX ---
+        # First, attempt to tune via deep link if a content_id is provided.
+        content_id = channel_data.get('deep_link_content_id')
+        if content_id:
+            media_type = channel_data.get('media_type', 'live')
+            params = f"?contentId={content_id}&mediaType={media_type}"
+            # The deep link is sent as part of the launch URL
+            roku_session.post(f"{launch_url}{params}")
+        else:
+            # If no deep link, just launch the app.
+            roku_session.post(launch_url)
+        # --- END OF FIX ---
+
+        # Wait for the app to load before sending any subsequent keypresses.
         time.sleep(channel_data.get("tune_delay", 1))
+
         plugin_script = channel_data.get('plugin_script')
         key_sequence = channel_data.get('key_sequence')
+
+        # Now, execute a plugin or key_sequence if one is defined.
+        # This will run AFTER the deep link has been attempted.
         if plugin_script and plugin_script in discovered_plugins:
             plugin = discovered_plugins[plugin_script]
             final_sequence = plugin.tune_channel(roku_ip, channel_data)
             if final_sequence: send_key_sequence(roku_ip, final_sequence)
         elif key_sequence:
             send_key_sequence(roku_ip, key_sequence)
-        else:
-            content_id = channel_data.get('deep_link_content_id')
-            if content_id:
-                media_type = channel_data.get('media_type', 'live')
-                params = f"?contentId={content_id}&mediaType={media_type}"
-                roku_session.post(f"{launch_url}{params}")
+        
+        # Finally, send a "Select" keypress if needed.
         if channel_data.get('needs_select_keypress'):
             time.sleep(1)
             send_key_sequence(roku_ip, ["Select"])
+
     except Exception as e:
         logging.error(f"Error during background tuning for {roku_ip}: {e}")
-
 def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_duration=0):
     try:
         if blank_duration > 0:
