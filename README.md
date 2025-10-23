@@ -1,4 +1,3 @@
-
 # **Roku Channels Bridge**
 
 **Release: Beta 5.1.0**
@@ -25,34 +24,100 @@ This setup allows you to use streaming service channels (like those from YouTube
 
 -----
 
-## **Installation**
+## **Installation (Recommended: Portainer)**
 
-The application is distributed as a multi-architecture Docker image, ready to run.
+The easiest and recommended way to run the application is using Portainer.
 
-### 1\. Run with Docker
+### Step 1: Create the Volume in Portainer
 
-The easiest way to run the application is with Docker Compose. For upgrades, save a config backup.
+This volume stores your configuration and ensures it persists through container updates.
 
-1.  Create a folder for your project. This folder's location is important, as it's where your recordings will be saved.
+1.  In Portainer, go to **Volumes** in the left menu.
+2.  Click **+ Add volume**.
+3.  Name the volume exactly `roku-bridge-config`.
+4.  Click **Create the volume**.
 
-2.  For first time installs, create the Docker volume manually by running this command in your terminal:
+### Step 2: Deploy the Stack in Portainer
 
-    ```
-    docker volume create roku-bridge-config
-    ```
-   
-3.  Inside that folder, create a file named `docker-compose.yml` and add the following content:
+1.  Go to **Stacks** in the left menu.
+
+2.  Click **+ Add stack**.
+
+3.  Give your stack a name (e.g., `roku-bridge`).
+
+4.  Select the **Web editor** and paste the following `docker-compose.yml` code:
 
     ```yaml
+    version: '3.8'
+
+    services:
+      roku-bridge:
+        # The official Docker image for the project.
+        image: rcvaughn2/roku-ecp-tuner:test
+        container_name: roku-bridge
+        ports:
+          # You can change the host port (e.g., "5006") if it conflicts with another service.
+          - "5006:5000"
+        volumes:
+          # This volume stores the application's configuration files.
+          - roku-bridge-config:/app/config
+          # IMPORTANT: Change the path on the left to your desired local storage location for recordings.
+          - /path/to/your/recordings:/app/recordings
+        restart: unless-stopped
+
+    volumes:
+      # This tells Docker Compose to use the volume you created in Step 1.
+      roku-bridge-config:
+        external: true
+    ```
+
+### Step 3: Set Your Recordings Path (Crucial)
+
+Before deploying, you **must** edit one line in the web editor to set your local recordings path.
+
+  * **Find this line:**
+    `- /path/to/your/recordings:/app/recordings`
+
+  * **Change `/path/to/your/recordings`** to the absolute path on your host machine where you want your recordings saved.
+
+      * **Example (Linux):** `- /srv/data/roku-recordings:/app/recordings`
+      * **Example (Windows):** `- C:/Users/YourUser/Videos/RokuRecordings:/app/recordings`
+      * **Example (Synology):** `- /volume1/docker/roku-bridge/recordings:/app/recordings`
+
+### Step 4: Deploy and Configure
+
+1.  Click the **Deploy the stack** button.
+2.  Once the container is running, open your web browser and navigate to `http://<your-ip>:5006/status` to access the configuration panel.
+
+-----
+
+### **Alternative Installation: Docker Compose CLI**
+
+For users who prefer the command line:
+
+1.  Create a folder for your project (e.g., `mkdir roku-bridge` and `cd roku-bridge`).
+
+2.  Create the Docker volume manually first:
+
+    ```sh
+    docker volume create roku-bridge-config
+    ```
+
+3.  Create a file named `docker-compose.yml` and add the following content.
+
+    ```yaml
+    version: '3.8'
+
     services:
       roku-bridge:
         image: rcvaughn2/roku-ecp-tuner:test
-        container_name: roku-bridge-test
+        container_name: roku-bridge
         ports:
           - "5006:5000" # Host port : Container port
         volumes:
           - roku-bridge-config:/app/config
-          - ./recordings:/app/recordings
+          # Change the path on the left to your host's recording folder
+          - /path/to/your/recordings:/app/recordings
         restart: unless-stopped
 
     volumes:
@@ -60,20 +125,22 @@ The easiest way to run the application is with Docker Compose. For upgrades, sav
         external: true
     ```
 
-    **Note:** The `- ./recordings:/app/recordings` line means a `recordings` folder will be created on your host machine in the same directory as your `docker-compose.yml` file.
+    **Note:** Remember to change `/path/to/your/recordings` to your local path.
 
 4.  Open a terminal in your project folder and run: `docker-compose up -d`
 
-### 2\. Configure Your Tuners & Integrations
+-----
 
-Once the container is running, open your web browser and navigate to `http://<your-ip>:5006/status` to access the configuration panel.
+## **Post-Install Configuration**
 
-  * **Tuners**: Add each of your Roku devices by providing a name, its IP address, and the URL of its corresponding HDMI encoder stream.
-  * **Integrations**: To enable automatic metadata and artwork lookup for your recordings, you need a free API key from **The Movie Database (TMDb)**.
-    1.  Register for a free account at [https://www.themoviedb.org/signup](https://www.themoviedb.org/signup).
-    2.  In your account settings, go to the **API** section and request a key.
-    3.  Copy the **API Key (v3 auth)** and paste it into the "TMDb API Key" field in the Integrations section of the config page.
-    4.  Click **Save All Changes**.
+Once the container is running, open the web UI at `http://<your-ip>:5006/status`.
+
+1.  **Tuners**: Add each of your Roku devices by providing a name, its IP address, and the URL of its corresponding HDMI encoder stream.
+2.  **Integrations**: To enable automatic metadata and artwork lookup for your recordings, you need a free API key from **The Movie Database (TMDb)**.
+      * Register for a free account at [https://www.themoviedb.org/signup](https://www.themoviedb.org/signup).
+      * In your account settings, go to the **API** section and request a key.
+      * Copy the **API Key (v3 auth)** and paste it into the "TMDb API Key" field in the "Integrations" section of the config page.
+3.  Click **Save All Changes**.
 
 -----
 
@@ -123,7 +190,7 @@ To view your recordings in Channels DVR, add the `recordings` subfolders as "Per
 3.  Click **Add Source** -\> **Personal Media**.
 4.  **Add Movies**:
       * Name: `Recorded Movies`
-      * Path: Navigate to your `recordings` folder and select the `Movies` subfolder.
+      * Path: Navigate to your `recordings` folder (the one you defined in your `docker-compose.yml`) and select the `Movies` subfolder.
       * Content Type: **Movies**
 5.  **Add TV Shows**:
       * Click **Add Source** -\> **Personal Media** again.
