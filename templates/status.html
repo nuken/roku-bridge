@@ -526,19 +526,47 @@
 
         function deleteItem(key, index) { if (confirm('Are you sure?')) { appConfig[key].splice(index, 1); renderAllTables(); } }
 
+        // --- UPDATED JAVASCRIPT FUNCTION ---
         async function fetchStatus() {
             const tbody = document.getElementById('status-table-body');
             try {
-                const response = await fetch(window.location.origin + '/api/status'); const data = await response.json();
+                const response = await fetch(window.location.origin + '/api/status');
+                const data = await response.json();
+                
+                // Re-render the table structure if the number of tuners has changed
                 if (tbody.rows.length !== data.tuners.length) {
-                    tbody.innerHTML = (data.tuners || []).map(t => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')}"><i class="fas fa-spinner fa-spin"></i></td></tr>`).join('');
+                    tbody.innerHTML = (data.tuners || []).map(t => `
+                        <tr>
+                            <td>${t.name}</td>
+                            <td>${t.roku_ip}</td>
+                            <td>${t.encoder_url}</td>
+                            <td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')}">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </td>
+                        </tr>`).join('');
                 }
+
+                // Update the status icons and tooltips for each tuner
                 (data.statuses || []).forEach(s => {
                     const cell = document.getElementById(`status-${s.roku_ip.replace(/\./g, '-')}`);
-                    if (cell) cell.innerHTML = (s.roku_status === 'online' && s.encoder_status === 'online') ? '<i class="fas fa-check-circle" title="Roku & Encoder Online"></i>' : `${s.roku_status === 'online' ? '<i class="fas fa-check-circle" title="Roku Online"></i>' : '<i class="fas fa-times-circle" title="Roku Offline"></i>'} ${s.encoder_status === 'online' ? '<i class="fas fa-check-circle" title="Encoder Online"></i>' : '<i class="fas fa-times-circle" title="Encoder Offline"></i>'}`;
+                    if (!cell) return;
+
+                    const rokuIcon = s.roku_status === 'online'
+                        ? `<i class="fas fa-check-circle" title="Roku Online"></i>`
+                        : `<i class="fas fa-times-circle" title="Roku Offline: ${s.roku_error}"></i>`;
+
+                    const encoderIcon = s.encoder_status === 'online'
+                        ? `<i class="fas fa-check-circle" title="Encoder Online"></i>`
+                        : `<i class="fas fa-times-circle" title="Encoder Offline: ${s.encoder_error}"></i>`;
+
+                    cell.innerHTML = `${rokuIcon} ${encoderIcon}`;
                 });
-            } catch (error) { console.error('Error fetching status:', error); tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--error-color);">Failed to load status.</td></tr>'; }
+            } catch (error) {
+                console.error('Error fetching status:', error);
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--error-color);">Failed to load status.</td></tr>';
+            }
         }
+
 
         function showNotification(message, type = 'success') {
             const n = document.createElement('div');
@@ -609,4 +637,3 @@
     </script>
 </body>
 </html>
-

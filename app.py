@@ -20,7 +20,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.3"
+APP_VERSION = "4.5.4"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -71,7 +71,8 @@ PREVIEW_SESSIONS = {} # Keyed by tuner IP
 SESSION_LOCK = threading.Lock()
 
 roku_session = requests.Session()
-roku_session.timeout = 3
+roku_session.timeout = 8 # Increased timeout for better reliability
+roku_session.headers.update({"Connection": "close"}) # Prevent stale connections
 executor = ThreadPoolExecutor(max_workers=10) # Increased workers for more concurrent tasks
 
 # --- Core Application Logic ---
@@ -137,27 +138,38 @@ def release_tuner(tuner_ip):
                 break
 
 def send_key_sequence(device_ip, keys):
-    for key in keys:
+    for i, key in enumerate(keys):
         try:
             if isinstance(key, dict) and 'wait' in key:
                 time.sleep(float(key['wait']))
                 continue
             if isinstance(key, str) and key.lower().startswith('wait='):
-                try:
-                    duration = float(key.split('=')[1])
-                    time.sleep(duration)
-                    continue
-                except (ValueError, IndexError):
-                    logging.error(f"Invalid wait command: {key}")
-                    continue
+                try: duration = float(key.split('=')[1]); time.sleep(duration); continue
+                except (ValueError, IndexError): logging.error(f"Invalid wait command: {key}"); continue
+            
             safe_key = f"Lit_{urllib.parse.quote(key)}" if len(key) == 1 else key
             roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
             if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
-            time.sleep(0.5)
-        except Exception as e:
+            
+            # Use a configurable delay if provided in the channel data, otherwise default
+            custom_delay = next((float(k.split('=')[1]) for k in keys[i+1:] if isinstance(k, str) and k.startswith('delay=')), 0.5)
+            time.sleep(custom_delay)
+
+        except requests.exceptions.RequestException as e:
             logging.error(f"Failed to send key '{key}' to {device_ip}: {e}")
-            return False
+            # --- NEW: Retry mechanism ---
+            for attempt in range(2): # Retry up to 2 times
+                time.sleep(1) # Wait before retrying
+                try:
+                    roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
+                    logging.info(f"Successfully sent key '{key}' on retry {attempt + 1}")
+                    break
+                except requests.exceptions.RequestException:
+                    if attempt == 1:
+                        logging.error(f"Failed to send key '{key}' after multiple retries.")
+                        return False # Abort sequence on persistent failure
     return True
+
 
 def keep_alive_sender(roku_ip, key_string, interval_minutes, stop_event):
     keys = [k.strip() for k in key_string.split(',')]
@@ -570,29 +582,57 @@ def remote_reboot(device_ip):
 def get_remote_devices():
     return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
 
+# --- UPDATED API ENDPOINT ---
 @app.route('/api/status')
 def api_status():
-    statuses = []
     def check_tuner_status(tuner):
         roku_ip = tuner['roku_ip']
         encoder_url = tuner['encoder_url']
-        roku_status = 'offline'
-        encoder_status = 'offline'
+        roku_status, roku_error = 'offline', 'Unknown Error'
+        encoder_status, encoder_error = 'offline', 'Unknown Error'
+
         try:
-            roku_session.get(f"http://{roku_ip}:8060", timeout=3)
+            # Increased timeout and added specific error handling for Roku
+            roku_session.get(f"http://{roku_ip}:8060", timeout=8)
             roku_status = 'online'
-        except requests.exceptions.RequestException: pass
+            roku_error = ''
+        except requests.exceptions.Timeout:
+            roku_error = 'Timeout'
+        except requests.exceptions.ConnectionError:
+            roku_error = 'Connection Refused'
+        except requests.exceptions.RequestException as e:
+            roku_error = str(e)
+
         try:
-            with requests.get(encoder_url, timeout=5, stream=True, allow_redirects=True) as response:
+            # Increased timeout and added specific error handling for Encoder
+            with requests.get(encoder_url, timeout=10, stream=True, allow_redirects=True) as response:
                 response.raise_for_status()
                 if next(response.iter_content(1), None):
                     encoder_status = 'online'
-        except requests.exceptions.RequestException: pass
-        return { "name": tuner.get("name", roku_ip), "roku_ip": roku_ip, "encoder_url": encoder_url, "roku_status": roku_status, "encoder_status": encoder_status }
+                    encoder_error = ''
+        except requests.exceptions.Timeout:
+            encoder_error = 'Timeout'
+        except requests.exceptions.ConnectionError:
+            encoder_error = 'Connection Refused'
+        except requests.exceptions.RequestException as e:
+            encoder_error = f'HTTP {response.status_code}' if 'response' in locals() else str(e)
+
+        return {
+            "name": tuner.get("name", roku_ip),
+            "roku_ip": roku_ip,
+            "encoder_url": encoder_url,
+            "roku_status": roku_status,
+            "roku_error": roku_error,
+            "encoder_status": encoder_status,
+            "encoder_error": encoder_error
+        }
+
     with ThreadPoolExecutor(max_workers=len(TUNERS) or 1) as status_executor:
         statuses = list(status_executor.map(check_tuner_status, TUNERS))
+
     tuner_configs = [{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"], "encoder_url": t["encoder_url"]} for t in TUNERS]
     return jsonify({"tuners": tuner_configs, "statuses": statuses})
+
 
 @app.route('/api/plugins')
 def api_plugins():
@@ -602,4 +642,3 @@ def api_plugins():
 if __name__ != '__main__':
 
     load_config()
-
