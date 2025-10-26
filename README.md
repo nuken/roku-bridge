@@ -1,8 +1,10 @@
 # **Roku Channels Bridge**
 
-**Release: Beta 4.5.4**
+**Release: Beta 4.5.5**
 
 [**Official Configuration Guide**](https://tuner.ct.ws)
+
+The only apps that are confirmed to work correctly are the YouTube TV and DirecTV apps. 
 
 This project provides a bridge that integrates your Roku devices as tuners within the Channels DVR software. It works by capturing the HDMI output from a Roku with a dedicated HDMI encoder and uses this script to manage channel changes and proxy the video stream.
 

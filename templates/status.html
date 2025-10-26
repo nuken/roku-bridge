@@ -395,14 +395,33 @@
             }
             openModal('tuner-modal');
         }
-
+        
+        // --- UPDATED JAVASCRIPT FUNCTION ---
         document.getElementById('tuner-form').addEventListener('submit', function(e) {
             e.preventDefault();
             const index = this.querySelector('#tuner-index').value;
-            const data = { name: this.querySelector('#tuner-name').value, roku_ip: this.querySelector('#tuner-roku-ip').value, encoder_url: this.querySelector('#tuner-encoder-url').value, priority: parseInt(this.querySelector('#tuner-priority').value, 10), encoding_mode: this.querySelector('#tuner-encoding-mode').value };
+            
+            // --- START OF FIX: Sanitize Roku IP on the frontend ---
+            let rokuIp = this.querySelector('#tuner-roku-ip').value.toLowerCase().trim();
+            if (rokuIp.startsWith('http://')) {
+                rokuIp = rokuIp.substring(7);
+            } else if (rokuIp.startsWith('https://')) {
+                rokuIp = rokuIp.substring(8);
+            }
+            // --- END OF FIX ---
+
+            const data = { 
+                name: this.querySelector('#tuner-name').value, 
+                roku_ip: rokuIp, // Use the sanitized IP
+                encoder_url: this.querySelector('#tuner-encoder-url').value, 
+                priority: parseInt(this.querySelector('#tuner-priority').value, 10), 
+                encoding_mode: this.querySelector('#tuner-encoding-mode').value 
+            };
+
             if (!data.encoding_mode) delete data.encoding_mode;
             if (index) appConfig.tuners[parseInt(index, 10)] = data; else appConfig.tuners.push(data);
-            renderTuners(); closeModal('tuner-modal');
+            renderTuners(); 
+            closeModal('tuner-modal');
         });
 
         function openChannelModal(type, index = null) {
@@ -526,47 +545,23 @@
 
         function deleteItem(key, index) { if (confirm('Are you sure?')) { appConfig[key].splice(index, 1); renderAllTables(); } }
 
-        // --- UPDATED JAVASCRIPT FUNCTION ---
         async function fetchStatus() {
             const tbody = document.getElementById('status-table-body');
             try {
-                const response = await fetch(window.location.origin + '/api/status');
-                const data = await response.json();
-                
-                // Re-render the table structure if the number of tuners has changed
+                const response = await fetch(window.location.origin + '/api/status'); const data = await response.json();
                 if (tbody.rows.length !== data.tuners.length) {
-                    tbody.innerHTML = (data.tuners || []).map(t => `
-                        <tr>
-                            <td>${t.name}</td>
-                            <td>${t.roku_ip}</td>
-                            <td>${t.encoder_url}</td>
-                            <td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')}">
-                                <i class="fas fa-spinner fa-spin"></i>
-                            </td>
-                        </tr>`).join('');
+                    tbody.innerHTML = (data.tuners || []).map(t => `<tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td><td class="status-icon" id="status-${t.roku_ip.replace(/\./g, '-')}"><i class="fas fa-spinner fa-spin"></i></td></tr>`).join('');
                 }
-
-                // Update the status icons and tooltips for each tuner
                 (data.statuses || []).forEach(s => {
                     const cell = document.getElementById(`status-${s.roku_ip.replace(/\./g, '-')}`);
-                    if (!cell) return;
-
-                    const rokuIcon = s.roku_status === 'online'
-                        ? `<i class="fas fa-check-circle" title="Roku Online"></i>`
-                        : `<i class="fas fa-times-circle" title="Roku Offline: ${s.roku_error}"></i>`;
-
-                    const encoderIcon = s.encoder_status === 'online'
-                        ? `<i class="fas fa-check-circle" title="Encoder Online"></i>`
-                        : `<i class="fas fa-times-circle" title="Encoder Offline: ${s.encoder_error}"></i>`;
-
-                    cell.innerHTML = `${rokuIcon} ${encoderIcon}`;
+                    if (cell) {
+                        const rokuIcon = s.roku_status === 'online' ? `<i class="fas fa-check-circle" title="Roku Online"></i>` : `<i class="fas fa-times-circle" title="Roku Offline: ${s.roku_error}"></i>`;
+                        const encoderIcon = s.encoder_status === 'online' ? `<i class="fas fa-check-circle" title="Encoder Online"></i>` : `<i class="fas fa-times-circle" title="Encoder Offline: ${s.encoder_error}"></i>`;
+                        cell.innerHTML = `${rokuIcon} ${encoderIcon}`;
+                    }
                 });
-            } catch (error) {
-                console.error('Error fetching status:', error);
-                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--error-color);">Failed to load status.</td></tr>';
-            }
+            } catch (error) { console.error('Error fetching status:', error); tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--error-color);">Failed to load status.</td></tr>'; }
         }
-
 
         function showNotification(message, type = 'success') {
             const n = document.createElement('div');

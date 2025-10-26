@@ -20,7 +20,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.4"
+APP_VERSION = "4.5.5"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -419,13 +419,25 @@ def status_page():
     }
     return render_template('status.html', global_settings=settings)
 
+# --- UPDATED API ENDPOINT ---
 @app.route('/api/config', methods=['GET', 'POST'])
 def api_config():
     if request.method == 'POST':
         try:
             new_config = request.get_json()
-            # Ensure the structure is correct by creating a new dict with all required keys,
-            # getting the values from the received JSON, or using a default empty value.
+            
+            # --- START OF FIX: Sanitize Roku IP addresses ---
+            if 'tuners' in new_config and isinstance(new_config['tuners'], list):
+                for tuner in new_config['tuners']:
+                    if 'roku_ip' in tuner and isinstance(tuner['roku_ip'], str):
+                        ip = tuner['roku_ip'].lower().strip()
+                        if ip.startswith('http://'):
+                            ip = ip[7:]
+                        elif ip.startswith('https://'):
+                            ip = ip[8:]
+                        tuner['roku_ip'] = ip
+            # --- END OF FIX ---
+
             validated_config = {
                 "tuners": new_config.get("tuners", []),
                 "channels": new_config.get("channels", []),
@@ -442,7 +454,6 @@ def api_config():
     else: # GET
         try:
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
-            # Also ensure the GET response provides the full structure
             config_data['ondemand_apps'] = config_data.get('ondemand_apps', [])
             config_data['ondemand_settings'] = config_data.get('ondemand_settings', {})
             return jsonify(config_data)
@@ -450,6 +461,7 @@ def api_config():
             return jsonify({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+
 
 @app.route('/upload_config', methods=['POST'])
 def upload_config():
@@ -582,7 +594,6 @@ def remote_reboot(device_ip):
 def get_remote_devices():
     return jsonify([{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"]} for t in TUNERS])
 
-# --- UPDATED API ENDPOINT ---
 @app.route('/api/status')
 def api_status():
     def check_tuner_status(tuner):
