@@ -402,13 +402,32 @@
             openModal('tuner-modal');
         }
 
+        // --- UPDATED JAVASCRIPT FUNCTION ---
         document.getElementById('tuner-form').addEventListener('submit', function(e) {
             e.preventDefault();
             const index = this.querySelector('#tuner-index').value;
-            const data = { name: this.querySelector('#tuner-name').value, roku_ip: this.querySelector('#tuner-roku-ip').value, encoder_url: this.querySelector('#tuner-encoder-url').value, priority: parseInt(this.querySelector('#tuner-priority').value, 10), encoding_mode: this.querySelector('#tuner-encoding-mode').value };
+            
+            // --- START OF FIX: Sanitize Roku IP on the frontend ---
+            let rokuIp = this.querySelector('#tuner-roku-ip').value.toLowerCase().trim();
+            if (rokuIp.startsWith('http://')) {
+                rokuIp = rokuIp.substring(7);
+            } else if (rokuIp.startsWith('https://')) {
+                rokuIp = rokuIp.substring(8);
+            }
+            // --- END OF FIX ---
+
+            const data = { 
+                name: this.querySelector('#tuner-name').value, 
+                roku_ip: rokuIp, // Use the sanitized IP
+                encoder_url: this.querySelector('#tuner-encoder-url').value, 
+                priority: parseInt(this.querySelector('#tuner-priority').value, 10), 
+                encoding_mode: this.querySelector('#tuner-encoding-mode').value 
+            };
+            
             if (!data.encoding_mode) delete data.encoding_mode;
             if (index) appConfig.tuners[parseInt(index, 10)] = data; else appConfig.tuners.push(data);
-            renderTuners(); closeModal('tuner-modal');
+            renderTuners(); 
+            closeModal('tuner-modal');
         });
 
         function openChannelModal(type, index = null) {

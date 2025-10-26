@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "5.1.0" # Version updated for new feature
+APP_VERSION = "5.1.1" # Version updated for new feature
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -624,6 +624,19 @@ def api_config():
     if request.method == 'POST':
         try:
             new_config = request.get_json()
+
+            # --- START OF FIX: Sanitize Roku IP addresses ---
+            if 'tuners' in new_config and isinstance(new_config['tuners'], list):
+                for tuner in new_config['tuners']:
+                    if 'roku_ip' in tuner and isinstance(tuner['roku_ip'], str):
+                        ip = tuner['roku_ip'].lower().strip()
+                        if ip.startswith('http://'):
+                            ip = ip[7:]
+                        elif ip.startswith('https://'):
+                            ip = ip[8:]
+                        tuner['roku_ip'] = ip
+            # --- END OF FIX ---
+
             with open(CONFIG_FILE_PATH, 'w') as f: json.dump(new_config, f, indent=2)
             load_config()
             os.kill(os.getppid(), signal.SIGHUP)
