@@ -21,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "5.1.1" # Version updated for new feature
+APP_VERSION = "5.1.2" # Version updated for new feature
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -942,4 +942,5 @@ def api_metadata_episode_details():
 
 
 if __name__ != '__main__':
+
     load_config()
