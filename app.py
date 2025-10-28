@@ -20,7 +20,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.5"
+APP_VERSION = "4.5.6"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -316,6 +316,7 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
         
         # --- START OF FIX ---
         # Expanded the tags dictionary to include all possible custom EPG fields.
+        # This now also works for Gracenote channels to allow overrides.
         tags = {
             "tvg-name": "name",
             "channel-number": "channel-number",
