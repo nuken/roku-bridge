@@ -14,7 +14,6 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
 from werkzeug.utils import secure_filename
-from opensubtitlescom import OpenSubtitles
 
 # --- Import Plugin System ---
 from plugins import discovered_plugins
@@ -22,7 +21,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "5.1.0" # Version updated for new feature
+APP_VERSION = "5.1.2" # Version updated for new feature
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -60,7 +59,7 @@ ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
 SILENT_TS_PACKET = b'\x47\x40\x11\x10\x00\x02\xb0\x0d\x00\x01\xc1\x00\x00' + b'\xff' * 175
 TMDB_API_KEY = ''
-OPENSUBTITLES_SETTINGS = {}
+MACRO_RECORDING = {"active": False, "keys": [], "last_keypress_time": 0}
 
 def get_audio_channels():
     channels_input = os.getenv('AUDIO_CHANNELS', '2').lower()
@@ -82,13 +81,11 @@ executor = ThreadPoolExecutor(max_workers=10)
 # --- Core Application Logic ---
 
 def load_config():
-    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY, OPENSUBTITLES_SETTINGS
+    global TUNERS, CHANNELS, EPG_CHANNELS, ONDEMAND_APPS, ONDEMAND_SETTINGS, TMDB_API_KEY
     default_config = {
         "tuners": [], "channels": [], "epg_channels": [],
         "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "",
-        "opensubtitles_settings": {
-            "api_key": "", "username": "", "password": "", "language": "en"
-        }
+        "macros": []
     }
     
     if not os.path.exists(CONFIG_FILE_PATH):
@@ -110,17 +107,6 @@ def load_config():
                 config_data[key] = default_value
                 config_updated = True
                 logging.info(f"Adding missing required field '{key}' to the configuration.")
-        
-        # --- START: Gracefully handle opensubtitles_settings ---
-        if 'opensubtitles_settings' not in config_data or not isinstance(config_data['opensubtitles_settings'], dict):
-             config_data['opensubtitles_settings'] = default_config['opensubtitles_settings']
-             config_updated = True
-        else:
-             for sub_key, sub_default in default_config['opensubtitles_settings'].items():
-                 if sub_key not in config_data['opensubtitles_settings']:
-                     config_data['opensubtitles_settings'][sub_key] = sub_default
-                     config_updated = True
-        # --- END: Gracefully handle opensubtitles_settings ---
 
         if config_updated:
             with open(CONFIG_FILE_PATH, 'w') as f:
@@ -135,15 +121,11 @@ def load_config():
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
         ONDEMAND_SETTINGS = config_data.get('ondemand_settings', {})
         TMDB_API_KEY = config_data.get('tmdb_api_key', '')
-        OPENSUBTITLES_SETTINGS = config_data.get('opensubtitles_settings', {})
         
         if DEBUG_LOGGING_ENABLED:
             logging.info(f"Loaded {len(TUNERS)} tuners, {len(CHANNELS)} Gracenote, {len(EPG_CHANNELS)} EPG channels, {len(ONDEMAND_APPS)} On-Demand apps.")
         if TMDB_API_KEY:
             logging.info("TMDb API Key is configured.")
-        if OPENSUBTITLES_SETTINGS.get('api_key'):
-            logging.info("OpenSubtitles Integration is configured.")
-
 
     except Exception as e:
         logging.error(f"Error loading config: {e}")
@@ -225,28 +207,42 @@ def execute_tuning_in_background(roku_ip, channel_data):
     try:
         if DEBUG_LOGGING_ENABLED: logging.info(f"Tuning to actual channel {channel_data['name']}...")
         launch_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
-        roku_session.post(launch_url)
+
+        # --- START OF FIX ---
+        # First, attempt to tune via deep link if a content_id is provided.
+        content_id = channel_data.get('deep_link_content_id')
+        if content_id:
+            media_type = channel_data.get('media_type', 'live')
+            params = f"?contentId={content_id}&mediaType={media_type}"
+            # The deep link is sent as part of the launch URL
+            roku_session.post(f"{launch_url}{params}")
+        else:
+            # If no deep link, just launch the app.
+            roku_session.post(launch_url)
+        # --- END OF FIX ---
+
+        # Wait for the app to load before sending any subsequent keypresses.
         time.sleep(channel_data.get("tune_delay", 1))
+
         plugin_script = channel_data.get('plugin_script')
         key_sequence = channel_data.get('key_sequence')
+
+        # Now, execute a plugin or key_sequence if one is defined.
+        # This will run AFTER the deep link has been attempted.
         if plugin_script and plugin_script in discovered_plugins:
             plugin = discovered_plugins[plugin_script]
             final_sequence = plugin.tune_channel(roku_ip, channel_data)
             if final_sequence: send_key_sequence(roku_ip, final_sequence)
         elif key_sequence:
             send_key_sequence(roku_ip, key_sequence)
-        else:
-            content_id = channel_data.get('deep_link_content_id')
-            if content_id:
-                media_type = channel_data.get('media_type', 'live')
-                params = f"?contentId={content_id}&mediaType={media_type}"
-                roku_session.post(f"{launch_url}{params}")
+        
+        # Finally, send a "Select" keypress if needed.
         if channel_data.get('needs_select_keypress'):
             time.sleep(1)
             send_key_sequence(roku_ip, ["Select"])
+
     except Exception as e:
         logging.error(f"Error during background tuning for {roku_ip}: {e}")
-
 def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_duration=0):
     try:
         if blank_duration > 0:
@@ -274,77 +270,7 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
     finally:
         release_tuner(roku_ip_to_release)
 
-# --- START OF SUBTITLE FUNCTION ---
-def download_and_embed_subtitles(output_path, metadata, content_type):
-    if not all(OPENSUBTITLES_SETTINGS.get(k) for k in ['api_key', 'username', 'password']):
-        logging.info("[Subtitles] OpenSubtitles credentials are not fully configured. Skipping subtitle search.")
-        return
-
-    tmdb_id = metadata.get('tmdb_id')
-    if not tmdb_id:
-        logging.warning(f"[Subtitles] No TMDb ID found for '{metadata.get('title')}'. Cannot search for subtitles.")
-        return
-
-    logging.info(f"[Subtitles] Starting subtitle search for '{metadata.get('title')}' (TMDb ID: {tmdb_id}).")
-
-    try:
-        os_client = OpenSubtitles(f"Roku-Bridge v{APP_VERSION}", OPENSUBTITLES_SETTINGS['api_key'])
-        os_client.login(OPENSUBTITLES_SETTINGS['username'], OPENSUBTITLES_SETTINGS['password'])
-        
-        search_params = {
-            'tmdb_id': tmdb_id,
-            'languages': OPENSUBTITLES_SETTINGS.get('language', 'en')
-        }
-        
-        if content_type == 'show':
-            season = metadata.get('season')
-            episode = metadata.get('episode')
-            if not season or not episode:
-                logging.warning("[Subtitles] TV show is missing season or episode number. Cannot search for subtitles.")
-                return
-            search_params['season_number'] = int(season)
-            search_params['episode_number'] = int(episode)
-
-        results = os_client.search(**search_params)
-
-        if not results:
-            logging.warning(f"[Subtitles] No subtitles found for '{metadata.get('title')}'.")
-            return
-
-        # Download the first result. More complex logic could be added here to pick the "best" one.
-        subtitle_filename = os.path.join(os.path.dirname(output_path), f"temp_subtitle.srt")
-        os_client.download_and_parse(results.data[0], destination=subtitle_filename)
-        
-        logging.info(f"[Subtitles] Subtitle file downloaded successfully to {subtitle_filename}.")
-
-        # --- Embed subtitle using ffmpeg ---
-        temp_output_path = output_path + ".tmp.mkv"
-        
-        mux_command = [
-            'ffmpeg', '-y', '-i', output_path, '-i', subtitle_filename,
-            '-c', 'copy', '-map', '0', '-map', '1',
-            '-metadata:s:s:0', f"language={OPENSUBTITLES_SETTINGS.get('language', 'en')}",
-            '-metadata:s:s:0', 'title=English', # Can be customized
-            '-disposition:s:0', 'default',
-            '-f', 'matroska', '-loglevel', 'warning', temp_output_path
-        ]
-        
-        subprocess.run(mux_command, check=True)
-
-        os.replace(temp_output_path, output_path)
-        logging.info(f"[Subtitles] Subtitle successfully embedded into {output_path}.")
-
-    except Exception as e:
-        logging.error(f"[Subtitles] An error occurred during the subtitle process: {e}")
-    finally:
-        # --- Cleanup ---
-        if 'subtitle_filename' in locals() and os.path.exists(subtitle_filename):
-            os.remove(subtitle_filename)
-            logging.info(f"[Subtitles] Cleaned up temporary subtitle file.")
-# --- END OF SUBTITLE FUNCTION ---
-
-
-def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, output_path, metadata, content_type):
+def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds):
     """
     This function runs in a background thread to monitor the status of a recording.
     It periodically queries the Roku to see if the content has finished playing.
@@ -444,10 +370,6 @@ def watch_recording_session(tuner_ip, ffmpeg_process, max_duration_seconds, outp
             logging.warning(f"[Recording Watcher] FFmpeg process for {tuner_ip} did not terminate gracefully. Killing.")
             ffmpeg_process.kill()
             
-    # --- START: Trigger subtitle download post-recording ---
-    executor.submit(download_and_embed_subtitles, output_path, metadata, content_type)
-    # --- END: Trigger subtitle download post-recording ---
-
     release_tuner(tuner_ip)
 
 def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
@@ -520,7 +442,7 @@ def start_local_recording(tuner_ip, duration_minutes, metadata, content_type):
         RECORDING_PROCESSES[tuner_ip] = process
         logging.info(f"[Recording] Started local recording for tuner {tuner['name']} to file {output_path}")
         
-        watcher_thread = threading.Thread(target=watch_recording_session, args=(tuner_ip, process, duration_seconds, output_path, metadata, content_type))
+        watcher_thread = threading.Thread(target=watch_recording_session, args=(tuner_ip, process, duration_seconds))
         watcher_thread.daemon = True
         watcher_thread.start()
         
@@ -704,6 +626,19 @@ def api_config():
     if request.method == 'POST':
         try:
             new_config = request.get_json()
+
+            # --- START OF FIX: Sanitize Roku IP addresses ---
+            if 'tuners' in new_config and isinstance(new_config['tuners'], list):
+                for tuner in new_config['tuners']:
+                    if 'roku_ip' in tuner and isinstance(tuner['roku_ip'], str):
+                        ip = tuner['roku_ip'].lower().strip()
+                        if ip.startswith('http://'):
+                            ip = ip[7:]
+                        elif ip.startswith('https://'):
+                            ip = ip[8:]
+                        tuner['roku_ip'] = ip
+            # --- END OF FIX ---
+
             with open(CONFIG_FILE_PATH, 'w') as f: json.dump(new_config, f, indent=2)
             load_config()
             os.kill(os.getppid(), signal.SIGHUP)
@@ -714,7 +649,7 @@ def api_config():
             with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f)
             return jsonify(config_data)
         except FileNotFoundError:
-            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": "", "opensubtitles_settings": { "api_key": "", "username": "", "password": "", "language": "en" }})
+            return jsonify({ "tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}, "tmdb_api_key": ""})
         except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])
@@ -759,12 +694,32 @@ def remote_launch(device_ip, app_id):
 
 @app.route('/remote/keypress/<device_ip>/<key>', methods=['POST'])
 def remote_keypress(device_ip, key):
+    global MACRO_RECORDING
+
+    # 1. Standard logic: Check sessions
     with SESSION_LOCK:
         is_in_preview = device_ip in PREVIEW_SESSIONS
     if not any(t['roku_ip'] == device_ip for t in TUNERS) and not is_in_preview:
         return jsonify({"status": "error", "message": "Device not found or not in a session."}), 404
+
     try:
+        # 2. Send the actual key to Roku
         roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}")
+
+        # 3. MACRO RECORDER LOGIC
+        if MACRO_RECORDING["active"]:
+            current_time = time.time()
+            # Calculate delay since last press (cap at 5 seconds to avoid huge waits if you get distracted)
+            if MACRO_RECORDING["last_keypress_time"] > 0:
+                delay = min(current_time - MACRO_RECORDING["last_keypress_time"], 5.0)
+                # Only record waits longer than 0.5 seconds to keep it snappy
+                if delay > 0.5:
+                    MACRO_RECORDING["keys"].append({"wait": round(delay, 2)})
+
+            MACRO_RECORDING["keys"].append(key)
+            MACRO_RECORDING["last_keypress_time"] = current_time
+            logging.info(f"[Macro] Recorded key: {key}")
+
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -1007,6 +962,52 @@ def api_metadata_episode_details():
         return jsonify({"status": "error", "message": str(e)}), 500
 # --- END: New endpoint for episode details ---
 
+@app.route('/api/macro/start', methods=['POST'])
+def api_macro_start():
+    global MACRO_RECORDING
+    MACRO_RECORDING = {"active": True, "keys": [], "last_keypress_time": time.time()}
+    logging.info("Macro recording started.")
+    return jsonify({"status": "success"})
+
+@app.route('/api/macro/stop', methods=['POST'])
+def api_macro_stop():
+    global MACRO_RECORDING
+    MACRO_RECORDING["active"] = False
+    logging.info(f"Macro recording stopped. Captured {len(MACRO_RECORDING['keys'])} steps.")
+    return jsonify({"status": "success", "sequence": MACRO_RECORDING["keys"]})
+
+@app.route('/api/macro/save', methods=['POST'])
+def api_macro_save():
+    data = request.get_json()
+    name = data.get('name')
+    sequence = data.get('sequence')
+
+    if not name or not sequence:
+        return jsonify({"status": "error", "message": "Name and sequence required"}), 400
+
+    try:
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            config = json.load(f)
+
+        if 'macros' not in config:
+            config['macros'] = []
+
+        # Overwrite if exists, or append
+        existing = next((m for m in config['macros'] if m['name'] == name), None)
+        if existing:
+            existing['sequence'] = sequence
+        else:
+            config['macros'].append({"name": name, "sequence": sequence})
+
+        with open(CONFIG_FILE_PATH, 'w') as f:
+            json.dump(config, f, indent=2)
+
+        # Reload config in memory
+        load_config()
+        return jsonify({"status": "success", "message": "Macro saved successfully."})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ != '__main__':
+
     load_config()

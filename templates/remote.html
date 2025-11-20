@@ -109,6 +109,19 @@
     <div class="remote-container">
         <h1><i class="fa-solid fa-satellite-dish"></i> Roku Remote</h1>
         <div class="device-selector">
+        <div class="macro-controls" style="background: #222; padding: 10px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #444;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span id="macro-status" style="font-size: 0.9em; color: #aaa;"><i class="fa-solid fa-circle" style="font-size: 0.7em;"></i> Ready</span>
+                <div style="display: flex; gap: 10px;">
+                    <button id="btn-record-start" onclick="startRecording()" class="action-button" style="background-color: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer;">
+                        <i class="fa-solid fa-record-vinyl"></i> Rec
+                    </button>
+                    <button id="btn-record-stop" onclick="stopRecording()" class="action-button" style="display: none; background-color: #aaa; color: white; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer;">
+                        <i class="fa-solid fa-stop"></i> Stop
+                    </button>
+                </div>
+            </div>
+        </div>
             <select id="device-select" onchange="selectDevice()">
                 <option value="">Select a Roku Device</option>
             </select>
@@ -125,6 +138,25 @@
                 <button class="remote-button" id="button-home" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
                 <button class="remote-button" id="button-reboot" onclick="rebootDevice()"><i class="fa-solid fa-rotate"></i></button>
             </div>
+            <div id="macro-save-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Save Macro</h3>
+                <span class="close-button" onclick="closeModal('macro-save-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Recording finished. Give your macro a name:</p>
+                <input type="text" id="macro-name-input" placeholder="e.g. Start Netflix, Tuning Sequence" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background: #222; color: white;">
+                <div style="margin-top: 15px; text-align: left; background: #111; padding: 10px; border-radius: 6px; max-height: 150px; overflow-y: auto;">
+                    <code id="macro-preview" style="font-size: 0.8em; color: #0f0;"></code>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-button cancel" onclick="closeModal('macro-save-modal')">Discard</button>
+                <button class="modal-button confirm" style="background-color: var(--success-color);" onclick="saveMacro()">Save</button>
+            </div>
+        </div>
+    </div>
             <div class="d-pad">
                 <button class="remote-button" id="button-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
                 <button class="remote-button" id="button-left" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
@@ -302,6 +334,64 @@
                 closeRebootModal();
             }
         }
+
+       let currentRecordedSequence = [];
+
+        async function startRecording() {
+            if (!selectedDeviceIp) { showNotification('Select a device first.'); return; }
+            try {
+                await fetch('/api/macro/start', { method: 'POST' });
+                document.getElementById('btn-record-start').style.display = 'none';
+                document.getElementById('btn-record-stop').style.display = 'inline-block';
+                const status = document.getElementById('macro-status');
+                status.innerHTML = '<i class="fa-solid fa-circle fa-fade" style="color: red;"></i> Recording...';
+                status.style.color = 'red';
+                showNotification('Recording started. Perform your keypresses now.');
+            } catch (e) { showNotification('Failed to start recording.'); }
+        }
+
+        async function stopRecording() {
+            try {
+                const res = await fetch('/api/macro/stop', { method: 'POST' });
+                const data = await res.json();
+
+                document.getElementById('btn-record-start').style.display = 'inline-block';
+                document.getElementById('btn-record-stop').style.display = 'none';
+                document.getElementById('macro-status').innerHTML = '<i class="fa-solid fa-circle"></i> Ready';
+                document.getElementById('macro-status').style.color = '#aaa';
+
+                if (data.status === 'success' && data.sequence.length > 0) {
+                    currentRecordedSequence = data.sequence;
+                    document.getElementById('macro-preview').textContent = JSON.stringify(data.sequence, null, 2);
+                    document.getElementById('macro-save-modal').style.display = 'flex';
+                } else {
+                    showNotification('No keys recorded.');
+                }
+            } catch (e) { showNotification('Error stopping recording.'); }
+        }
+
+        async function saveMacro() {
+            const name = document.getElementById('macro-name-input').value;
+            if (!name) { alert('Please enter a name.'); return; }
+
+            try {
+                const res = await fetch('/api/macro/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name: name, sequence: currentRecordedSequence })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showNotification('Macro saved!');
+                    closeModal('macro-save-modal');
+                } else {
+                    alert('Save failed: ' + data.message);
+                }
+            } catch (e) { alert('Save failed: ' + e); }
+        }
+
+        // Helper for closing the new modal
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
     </script>
 </body>
 </html>
