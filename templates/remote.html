@@ -80,8 +80,8 @@
             background-color: var(--surface-color); padding: 25px; border-radius: 12px;
             width: 90%; max-width: 400px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); text-align: center;
         }
-        .modal-header { 
-            display: flex; justify-content: space-between; align-items: center; 
+        .modal-header {
+            display: flex; justify-content: space-between; align-items: center;
             padding-bottom: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color);
         }
         .modal-header h3 { margin: 0; color: var(--primary-color); font-size: 1.2em; }
@@ -126,7 +126,7 @@
                 <option value="">Select a Roku Device</option>
             </select>
         </div>
-        
+
         <div class="keyboard-section">
             <input type="text" id="keyboard-input" placeholder="Type here...">
             <button onclick="sendText()"><i class="fa-solid fa-paper-plane"></i></button>
@@ -138,25 +138,7 @@
                 <button class="remote-button" id="button-home" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
                 <button class="remote-button" id="button-reboot" onclick="rebootDevice()"><i class="fa-solid fa-rotate"></i></button>
             </div>
-            <div id="macro-save-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Save Macro</h3>
-                <span class="close-button" onclick="closeModal('macro-save-modal')">&times;</span>
-            </div>
-            <div class="modal-body">
-                <p>Recording finished. Give your macro a name:</p>
-                <input type="text" id="macro-name-input" placeholder="e.g. Start Netflix, Tuning Sequence" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background: #222; color: white;">
-                <div style="margin-top: 15px; text-align: left; background: #111; padding: 10px; border-radius: 6px; max-height: 150px; overflow-y: auto;">
-                    <code id="macro-preview" style="font-size: 0.8em; color: #0f0;"></code>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="modal-button cancel" onclick="closeModal('macro-save-modal')">Discard</button>
-                <button class="modal-button confirm" style="background-color: var(--success-color);" onclick="saveMacro()">Save</button>
-            </div>
-        </div>
-    </div>
+
             <div class="d-pad">
                 <button class="remote-button" id="button-up" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
                 <button class="remote-button" id="button-left" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
@@ -164,6 +146,7 @@
                 <button class="remote-button" id="button-right" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
                 <button class="remote-button" id="button-down" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
             </div>
+
             <div class="button-row">
                 <button class="remote-button" id="button-rewind" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
                 <button class="remote-button" id="button-play-pause" onclick="togglePlayPause(this)">
@@ -191,7 +174,25 @@
             </div>
         </div>
     </div>
-
+<div id="macro-save-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Save Macro</h3>
+                <span class="close-button" onclick="closeModal('macro-save-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Recording finished. Give your macro a name:</p>
+                <input type="text" id="macro-name-input" placeholder="e.g. Start Netflix, Tuning Sequence" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background: #222; color: white;">
+                <div style="margin-top: 15px; text-align: left; background: #111; padding: 10px; border-radius: 6px; max-height: 150px; overflow-y: auto;">
+                    <code id="macro-preview" style="font-size: 0.8em; color: #0f0;"></code>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-button cancel" onclick="closeModal('macro-save-modal')">Discard</button>
+                <button class="modal-button confirm" style="background-color: var(--success-color);" onclick="saveMacro()">Save</button>
+            </div>
+        </div>
+    </div>
     <script>
         const deviceSelect = document.getElementById('device-select');
         let selectedDeviceIp = '';
@@ -202,7 +203,7 @@
             notification.className = 'notification';
             notification.textContent = message;
             notificationArea.appendChild(notification);
-            
+
             setTimeout(() => {
                 notification.classList.add('show');
             }, 10);
@@ -275,7 +276,7 @@
                 pauseIcon.style.display = 'inline-block';
             }
         }
-        
+
         async function sendText() {
             const textInput = document.getElementById('keyboard-input');
             const text = textInput.value;
@@ -284,12 +285,12 @@
                 showNotification('Please select a device first.');
                 return;
             }
-            
+
             for (const char of text) {
                 await sendKey(`Lit_${char}`);
-                await new Promise(resolve => setTimeout(resolve, 50)); 
+                await new Promise(resolve => setTimeout(resolve, 50));
             }
-            
+
             textInput.value = '';
         }
 
