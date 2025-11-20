@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plugin Creator</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+    <style>
+        :root { --bg-color: #2c2c2c; --surface-color: #3a3a3a; --primary-color: #7dd3fc; --text-color: #e0e0e0; --border-color: #4a4a4a; --success-color: #28a745; --error-color: #dc3545; }
+        body { font-family: system-ui, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* Header */
+        .header { padding: 15px; background-color: var(--surface-color); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
+        .header h2 { margin: 0; color: var(--primary-color); display: flex; align-items: center; gap: 10px; }
+        .nav-buttons a { background-color: #555; color: white; padding: 8px 12px; border-radius: 6px; text-decoration: none; font-size: 0.9em; margin-left: 5px; }
+        
+        /* Main Layout */
+        .main-content { display: flex; flex-grow: 1; height: calc(100vh - 70px); }
+        
+        /* Left Sidebar (Controls) */
+        .sidebar { width: 300px; background-color: #222; padding: 20px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow-y: auto; }
+        .control-group { margin-bottom: 20px; background: var(--surface-color); padding: 15px; border-radius: 10px; }
+        .control-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #aaa; }
+        .control-group input, .control-group select { width: 100%; padding: 10px; margin-bottom: 10px; background: #111; border: 1px solid #444; color: white; border-radius: 5px; box-sizing: border-box; }
+        .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; color: white; margin-top: 5px; }
+        .btn-primary { background-color: var(--primary-color); color: #222; }
+        .btn-danger { background-color: var(--error-color); }
+        .btn-success { background-color: var(--success-color); }
+        
+        /* Step List */
+        #step-list { flex-grow: 1; background: #111; border-radius: 8px; padding: 10px; overflow-y: auto; font-family: monospace; font-size: 0.9em; }
+        .step-item { padding: 5px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; }
+        .step-item:last-child { border-bottom: none; }
+        
+        /* Video Area */
+        .video-area { flex-grow: 1; background: black; display: flex; align-items: center; justify-content: center; position: relative; }
+        video { width: 100%; height: 100%; object-fit: contain; }
+
+        /* Floating Remote */
+        #remote-modal { position: absolute; top: 20px; right: 20px; background-color: rgba(58, 58, 58, 0.9); border-radius: 20px; padding: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 200px; cursor: move; border: 1px solid #555; z-index: 100; }
+        .remote-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; justify-items: center; margin-bottom: 10px; }
+        .remote-btn { background-color: #555; color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 1.2em; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: background 0.2s; }
+        .remote-btn:active { transform: scale(0.95); background: #777; }
+        .remote-btn.ok { background-color: var(--primary-color); color: #222; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2><i class="fa-solid fa-wand-magic-sparkles"></i> Plugin Creator</h2>
+        <div class="nav-buttons">
+            <a href="/status">Back to Status</a>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="sidebar">
+            <div class="control-group">
+                <label>1. Select Tuner</label>
+                <select id="tuner-select"></select>
+                <label>2. Start App</label>
+                <input type="text" id="app-id-input" placeholder="Roku App ID (e.g. 12345)">
+                <button class="btn btn-primary" onclick="startCreatorSession()">Start Session</button>
+                <button class="btn btn-danger" onclick="stopCreatorSession()" style="margin-top: 5px;">End Session</button>
+            </div>
+
+            <div class="control-group" id="recording-controls" style="opacity: 0.5; pointer-events: none;">
+                <label>3. Recording</label>
+                <div style="display: flex; gap: 5px;">
+                    <button class="btn btn-danger" id="btn-rec" onclick="toggleRecording()"><i class="fa-solid fa-circle"></i> Rec</button>
+                    <button class="btn btn-success" id="btn-save" onclick="savePlugin()"><i class="fa-solid fa-save"></i> Save Plugin</button>
+                </div>
+                <input type="text" id="plugin-name" placeholder="Plugin Name (e.g. Tune CNN)" style="margin-top: 10px;">
+            </div>
+
+            <label>Recorded Steps:</label>
+            <div id="step-list"></div>
+        </div>
+
+        <div class="video-area">
+            <video id="video-player" autoplay muted playsinline></video>
+            
+            <div id="remote-modal">
+                <div class="remote-row">
+                    <button class="remote-btn" onclick="sendKey('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+                    <button class="remote-btn" onclick="sendKey('Home')"><i class="fa-solid fa-house"></i></button>
+                    <button class="remote-btn" onclick="sendKey('Info')"><i class="fa-solid fa-asterisk"></i></button>
+                </div>
+                <div class="remote-row">
+                    <div></div>
+                    <button class="remote-btn" onclick="sendKey('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+                    <div></div>
+                </div>
+                <div class="remote-row">
+                    <button class="remote-btn" onclick="sendKey('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button class="remote-btn ok" onclick="sendKey('Select')">OK</button>
+                    <button class="remote-btn" onclick="sendKey('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+                <div class="remote-row">
+                    <div></div>
+                    <button class="remote-btn" onclick="sendKey('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+                    <div></div>
+                </div>
+                <div class="remote-row" style="margin-top: 15px;">
+                    <button class="remote-btn" onclick="sendKey('Rev')"><i class="fa-solid fa-backward"></i></button>
+                    <button class="remote-btn" onclick="sendKey('Play')"><i class="fa-solid fa-play"></i></button>
+                    <button class="remote-btn" onclick="sendKey('Fwd')"><i class="fa-solid fa-forward"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let player;
+        let activeTunerIp = null;
+        let isRecording = false;
+        let recordedSteps = [];
+        let lastKeyTime = 0;
+
+        // --- Initialization ---
+        async function loadTuners() {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+            const select = document.getElementById('tuner-select');
+            data.tuners.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.roku_ip;
+                opt.textContent = t.name || t.roku_ip;
+                select.appendChild(opt);
+            });
+        }
+
+        // --- Session Management ---
+        async function startCreatorSession() {
+            const tunerIp = document.getElementById('tuner-select').value;
+            const appId = document.getElementById('app-id-input').value;
+            if(!tunerIp || !appId) return alert("Please select a tuner and Enter an App ID");
+
+            // 1. Start Preview Session
+            await fetch('/api/pretune/start', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ tuner_ip: tunerIp })
+            });
+
+            // 2. Launch App
+            await fetch(`/remote/launch/${tunerIp}/${appId}`, { method: 'POST' });
+
+            // 3. Start Video
+            activeTunerIp = tunerIp;
+            const streamUrl = `/api/pretune/stream?tuner_ip=${tunerIp}`;
+            if (mpegts.isSupported()) {
+                if (player) { player.destroy(); }
+                player = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: streamUrl });
+                player.attachMediaElement(document.getElementById('video-player'));
+                player.load();
+                player.play();
+            }
+
+            // 4. Initialize Recording State
+            recordedSteps = [{ action: 'launch', app_id: appId }];
+            updateStepList();
+            
+            // Enable Recording Controls
+            document.getElementById('recording-controls').style.opacity = '1';
+            document.getElementById('recording-controls').style.pointerEvents = 'auto';
+        }
+
+        async function stopCreatorSession() {
+            if(activeTunerIp) {
+                await fetch('/api/pretune/stop', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ tuner_ip: activeTunerIp })
+                });
+            }
+            if(player) { player.destroy(); player = null; }
+            activeTunerIp = null;
+            document.getElementById('recording-controls').style.opacity = '0.5';
+            document.getElementById('recording-controls').style.pointerEvents = 'none';
+            isRecording = false;
+            document.getElementById('btn-rec').innerHTML = '<i class="fa-solid fa-circle"></i> Rec';
+        }
+
+        // --- Recording Logic ---
+        function toggleRecording() {
+            isRecording = !isRecording;
+            const btn = document.getElementById('btn-rec');
+            if(isRecording) {
+                btn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop Rec';
+                btn.classList.remove('btn-danger'); btn.classList.add('btn-primary');
+                lastKeyTime = Date.now();
+            } else {
+                btn.innerHTML = '<i class="fa-solid fa-circle"></i> Rec';
+                btn.classList.add('btn-danger'); btn.classList.remove('btn-primary');
+            }
+        }
+
+        async function sendKey(key) {
+            if(!activeTunerIp) return;
+
+            // Send to Roku
+            fetch(`/remote/keypress/${activeTunerIp}/${key}`, { method: 'POST' });
+
+            // Record
+            if(isRecording) {
+                const now = Date.now();
+                const delay = Math.min((now - lastKeyTime) / 1000, 5.0); // Max 5s wait
+                if(delay > 0.5) {
+                    recordedSteps.push({ wait: parseFloat(delay.toFixed(2)) });
+                }
+                recordedSteps.push(key);
+                lastKeyTime = now;
+                updateStepList();
+            }
+        }
+
+        function updateStepList() {
+            const list = document.getElementById('step-list');
+            list.innerHTML = recordedSteps.map((step, i) => {
+                if(typeof step === 'string') return `<div class="step-item"><span>Keypress</span><span>${step}</span></div>`;
+                if(step.action === 'launch') return `<div class="step-item" style="color: cyan;"><span>Launch App</span><span>${step.app_id}</span></div>`;
+                if(step.wait) return `<div class="step-item" style="color: orange;"><span>Wait</span><span>${step.wait}s</span></div>`;
+            }).join('');
+            list.scrollTop = list.scrollHeight;
+        }
+
+        async function savePlugin() {
+            const name = document.getElementById('plugin-name').value;
+            if(!name) return alert("Enter a plugin name");
+            
+            const res = await fetch('/api/plugins/save_json', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name: name, sequence: recordedSteps })
+            });
+            
+            if(res.ok) {
+                alert("Plugin Saved! It is now available in the Status page.");
+                stopCreatorSession();
+            } else {
+                alert("Error saving plugin.");
+            }
+        }
+
+        // Draggable Remote
+        const remote = document.getElementById('remote-modal');
+        let isDragging = false, offset = {x:0, y:0};
+        remote.addEventListener('mousedown', e => { isDragging = true; offset.x = e.offsetX; offset.y = e.offsetY; });
+        document.addEventListener('mouseup', () => isDragging = false);
+        document.addEventListener('mousemove', e => {
+            if(isDragging) {
+                remote.style.left = (e.clientX - offset.x) + 'px';
+                remote.style.top = (e.clientY - offset.y) + 'px';
+                remote.style.right = 'auto'; // Reset right alignment
+            }
+        });
+
+        loadTuners();
+    </script>
+</body>
+</html>

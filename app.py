@@ -9,6 +9,7 @@ import threading
 import httpx
 import urllib.parse
 import signal
+import glob
 from lxml import etree as ET # Switched to lxml for better XML parsing
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -21,7 +22,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "5.1.2" # Version updated for new feature
+APP_VERSION = "5.2.0" # Version bumped for Plugin Creator
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -54,6 +55,10 @@ root_logger.addHandler(deque_handler)
 CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
 RECORDINGS_DIR = '/app/recordings'
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
+JSON_PLUGIN_DIR = os.path.join(os.path.dirname(__file__), 'plugins', 'json')
+if not os.path.exists(JSON_PLUGIN_DIR):
+    os.makedirs(JSON_PLUGIN_DIR)
+
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
 AUDIO_BITRATE = os.getenv('AUDIO_BITRATE', '128k')
@@ -227,12 +232,39 @@ def execute_tuning_in_background(roku_ip, channel_data):
         plugin_script = channel_data.get('plugin_script')
         key_sequence = channel_data.get('key_sequence')
 
-        # Now, execute a plugin or key_sequence if one is defined.
-        # This will run AFTER the deep link has been attempted.
-        if plugin_script and plugin_script in discovered_plugins:
+        # --- JSON Plugin Logic ---
+        if plugin_script and plugin_script.startswith("json:"):
+            filename = plugin_script.replace("json:", "")
+            json_path = os.path.join(JSON_PLUGIN_DIR, filename)
+            if os.path.exists(json_path):
+                logging.info(f"Executing JSON plugin: {filename}")
+                try:
+                    with open(json_path, 'r') as f:
+                        p_data = json.load(f)
+                        sequence = p_data.get('sequence', [])
+                        
+                        for step in sequence:
+                            # Handle the specific 'launch' action if recorded in the creator
+                            if isinstance(step, dict) and step.get('action') == 'launch':
+                                app_id = step.get('app_id')
+                                if app_id:
+                                    l_url = f"http://{roku_ip}:8060/launch/{app_id}"
+                                    roku_session.post(l_url)
+                                    # Use channel tune delay or default to 2s for app load
+                                    time.sleep(channel_data.get("tune_delay", 2))
+                            else:
+                                # Standard key or wait command
+                                send_key_sequence(roku_ip, [step])
+                except Exception as e:
+                    logging.error(f"Error executing JSON plugin {filename}: {e}")
+        
+        # --- Python Plugin Logic ---
+        elif plugin_script and plugin_script in discovered_plugins:
             plugin = discovered_plugins[plugin_script]
             final_sequence = plugin.tune_channel(roku_ip, channel_data)
             if final_sequence: send_key_sequence(roku_ip, final_sequence)
+            
+        # --- Standard Key Sequence ---
         elif key_sequence:
             send_key_sequence(roku_ip, key_sequence)
         
@@ -243,6 +275,7 @@ def execute_tuning_in_background(roku_ip, channel_data):
 
     except Exception as e:
         logging.error(f"Error during background tuning for {roku_ip}: {e}")
+
 def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_duration=0):
     try:
         if blank_duration > 0:
@@ -602,6 +635,11 @@ def preview():
 @app.route('/pretune')
 def pretune_page(): return render_template('pretune.html', ondemand_apps=ONDEMAND_APPS)
 
+# --- NEW PLUGIN CREATOR ROUTE ---
+@app.route('/plugin_creator')
+def plugin_creator_page():
+    return render_template('plugin_creator.html')
+
 @app.route('/logs')
 def logs_page():
     if not DEBUG_LOGGING_ENABLED: return "Debug logging is not enabled.", 404
@@ -737,8 +775,49 @@ def get_remote_devices():
 
 @app.route('/api/plugins')
 def api_plugins():
+    # 1. Get Python Plugins
     plugin_list = [{"id": script_name, "name": plugin.app_name} for script_name, plugin in discovered_plugins.items()]
+    
+    # 2. Get JSON Plugins
+    json_files = glob.glob(os.path.join(JSON_PLUGIN_DIR, "*.json"))
+    for f in json_files:
+        try:
+            with open(f, 'r') as jf:
+                data = json.load(jf)
+                # We use the filename as the ID, prefixed to distinguish
+                plugin_id = f"json:{os.path.basename(f)}"
+                plugin_list.append({"id": plugin_id, "name": f"[JSON] {data.get('name', 'Unknown')}"})
+        except:
+            continue
+
     return jsonify(plugin_list)
+
+# --- NEW JSON SAVE ROUTE ---
+@app.route('/api/plugins/save_json', methods=['POST'])
+def save_json_plugin():
+    data = request.get_json()
+    name = data.get('name')
+    sequence = data.get('sequence')
+    
+    if not name or not sequence:
+        return jsonify({"error": "Missing name or sequence"}), 400
+        
+    # Create a safe filename (e.g., "Tune CNN" -> "tune_cnn.json")
+    safe_filename = "".join([c if c.isalnum() else "_" for c in name]).lower() + ".json"
+    file_path = os.path.join(JSON_PLUGIN_DIR, safe_filename)
+    
+    plugin_data = {
+        "name": name,
+        "type": "json_sequence",
+        "sequence": sequence
+    }
+    
+    try:
+        with open(file_path, 'w') as f:
+            json.dump(plugin_data, f, indent=2)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/pretune/status')
 def api_pretune_status():
