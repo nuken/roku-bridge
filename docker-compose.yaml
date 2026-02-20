@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  roku-bridge:
+    # Build the image from the local source (Dockerfile in the same directory)
+    build: .
+    container_name: roku-channels-bridge-lean
+    ports:
+      # Maps host port 5006 to container port 5000
+      - "5006:5000"
+    volumes:
+      # Persistent configuration storage
+      - ./config:/app/config
+    environment:
+      # Enable if you need logs for initial testing
+      - ENABLE_DEBUG_LOGGING=true
+    restart: unless-stopped
+
+volumes:
+  roku-bridge-config:
