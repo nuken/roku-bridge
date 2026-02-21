@@ -49,7 +49,7 @@
         <h2><i class="fa-solid fa-tv"></i> Deep-Link Channels</h2>
         <div class="table-wrapper">
             <table>
-                <thead><tr><th>Channel Name</th><th>Target App</th><th>Content ID</th><th>Gracenote ID</th><th>Delay</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Channel Name</th><th>Target App</th><th>Content ID</th><th>Gracenote ID</th><th>Actions</th></tr></thead>
                 <tbody id="channels-body"></tbody>
             </table>
         </div>
@@ -88,7 +88,6 @@
             <div class="form-group"><label>Content ID (The specific video ID to launch)</label><input type="text" id="c-content" required></div>
             <div class="form-group"><label>Gracenote Station ID (For Channels DVR Guide)</label><input type="text" id="c-gracenote" placeholder="e.g. 11594"></div>
             <div class="form-group"><label>Playlist Group (Optional)</label><input type="text" id="c-playlist" placeholder="e.g. Sports"></div>
-            <div class="form-group"><label>Tune Delay (Seconds to wait for app load)</label><input type="number" id="c-delay" value="3"></div>
             <button type="submit" class="button">Apply</button>
             <button type="button" class="button delete" onclick="closeModal('channel-modal')">Cancel</button>
         </form>
@@ -131,9 +130,14 @@
                 <button class="action-button delete" onclick="deleteItem('tuners',${i})">X</button></td></tr>`).join('');
             
             document.getElementById('channels-body').innerHTML = (config.channels || []).map((c, i) => `
-                <tr><td>${c.name}</td><td>${getAppName(c.roku_app_id)}</td><td>${c.deep_link_content_id}</td><td>${c.gracenote_id || '-'}</td><td>${c.tune_delay}s</td>
-                <td><button class="action-button edit" onclick="openChannelModal(${i})">Edit</button>
-                <button class="action-button delete" onclick="deleteItem('channels',${i})">X</button></td></tr>`).join('');
+                <tr><td>${c.name}</td><td>${getAppName(c.roku_app_id)}</td><td>${c.deep_link_content_id}</td><td>${c.gracenote_id || '-'}</td>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <a href="/preview/${c.id}" class="action-button" title="Preview Stream" style="background-color: #8b5cf6; text-decoration: none; padding: 6px 10px; display: inline-flex; align-items: center; justify-content: center;"><i class="fa-solid fa-play"></i></a>
+                        <button class="action-button edit" onclick="openChannelModal(${i})">Edit</button>
+                        <button class="action-button delete" onclick="deleteItem('channels',${i})">X</button>
+                    </div>
+                </td></tr>`).join('');
         }
 
         function openTunerModal(idx = null) {
@@ -157,7 +161,7 @@
             };
             if(idx !== "") config.tuners[idx] = data; else config.tuners.push(data);
             render(); closeModal('tuner-modal');
-        };
+        }
 
         function openChannelModal(idx = null) {
             document.getElementById('channel-index').value = idx !== null ? idx : "";
@@ -177,7 +181,6 @@
                 document.getElementById('c-content').value = c.deep_link_content_id;
                 document.getElementById('c-gracenote').value = c.gracenote_id || "";
                 document.getElementById('c-playlist').value = c.playlist || "";
-                document.getElementById('c-delay').value = c.tune_delay;
             } else { 
                 document.getElementById('channel-form').reset(); 
                 document.getElementById('c-app').value = "195316"; // Set default for new channels
@@ -194,12 +197,11 @@
                 roku_app_id: document.getElementById('c-app').value, // Gets the value from the dropdown
                 deep_link_content_id: document.getElementById('c-content').value,
                 gracenote_id: document.getElementById('c-gracenote').value,
-                playlist: document.getElementById('c-playlist').value,
-                tune_delay: parseInt(document.getElementById('c-delay').value)
+                playlist: document.getElementById('c-playlist').value
             };
             if(idx !== "") config.channels[idx] = data; else config.channels.push(data);
             render(); closeModal('channel-modal');
-        };
+        }
 
         function deleteItem(key, idx) { if(confirm("Are you sure?")) { config[key].splice(idx, 1); render(); } }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }

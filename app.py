@@ -2,10 +2,8 @@ import logging
 import json
 import os
 import requests
-import time
 import threading
 import urllib.parse
-import signal
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template, redirect
 
 app = Flask(__name__)
@@ -52,9 +50,6 @@ def execute_fast_tune(roku_ip, channel_data):
         try:
             logging.info(f"Tuning {roku_ip} to app {app_id} with content {content_id}")
             roku_session.post(url, timeout=2)
-            
-            # Adjustable tune delay to allow the app player to buffer before proxying starts
-            time.sleep(channel_data.get("tune_delay", 3))
         except Exception as e:
             logging.error(f"Tuning failed on {roku_ip}: {e}")
 
@@ -174,6 +169,13 @@ def generate_m3u():
         m3u_content.extend([extinf, stream_url])
 
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
+    
+@app.route('/preview/<channel_id>')
+def preview_channel(channel_id):
+    channel = next((c for c in CHANNELS if c["id"] == channel_id), None)
+    if not channel:
+        return "Channel Not Found", 404
+    return render_template('preview.html', channel=channel)
 
 # IMPORTANT: Ensure this is called at the bottom of the script
 if __name__ == 'app' or __name__ == '__main__':
