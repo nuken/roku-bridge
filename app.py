@@ -154,8 +154,15 @@ def stream_channel(channel_id):
 
 @app.route('/channels.m3u')
 def generate_m3u():
+    # Grab the playlist filter from the URL, if it exists
+    requested_playlist = request.args.get('playlist')
+    
     m3u_content = [f"#EXTM3U x-tvh-max-streams={len(TUNERS)}"]
     for channel in CHANNELS:
+        # If a URL filter is applied, skip channels that do not match
+        if requested_playlist and channel.get('playlist') != requested_playlist:
+            continue
+            
         stream_url = f"http://{request.host}/stream/{channel['id']}"
         # Gracenote integration: tvc-guide-stationid allows Channels DVR to auto-match guide data
         extinf = f'#EXTINF:-1 channel-id="{channel["id"]}" tvc-guide-stationid="{channel.get("gracenote_id", "")}"'
