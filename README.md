@@ -4,17 +4,17 @@
 
 **[Official Configuration Guide](https://tuner.ct.ws)**
 
-This "Lean and Mean" edition of the Roku Channels Bridge is a high-performance, ultra-lightweight proxy designed specifically for use with **LinkPi encoders**. By stripping out legacy transcoding features (`ffmpeg`) and complex macro systems, this version focuses entirely on lightning-fast tuning using Roku's native ECP Search/Browse deep-linking.
+This "Lean and Mean" edition of the Roku Channels Bridge is a high-performance, ultra-lightweight proxy designed specifically for use with **LinkPi encoders**. By stripping out legacy transcoding features (`ffmpeg`) and complex macro systems, this version focuses entirely on lightning-fast tuning using Roku's native ECP deep-linking.
 
-It is highly optimized for stable, deep-link-friendly streaming apps like **YouTube TV** and **DirecTV**.
+It is highly optimized for stable, deep-link-friendly streaming apps like **YouTube TV** and **DirecTV Stream**.
 
 ## **Key Features**
 
-* **Instant Deep-Linking:** Utilizes the Roku ECP `search/browse` endpoint to bypass app home screens and launch directly into live playback.
+* **Instant Deep-Linking:** Bypasses the Roku search menu and pushes the content ID directly into the app's internal player for the fastest possible tuning.
 * **Zero-Overhead Proxy:** Built strictly for hardware encoders like LinkPi that do not require re-encoding. It acts as a pure, high-speed pass-through for the video stream.
 * **Integrated Gracenote Auto-Mapping:** You no longer need a separate EPG/XMLTV file. Simply enter the Gracenote Station ID in the web interface, and Channels DVR will automatically map the guide data and channel logos.
+* **M3U Playlist Filtering:** Group channels together in the web UI and instantly generate separate, filtered M3U URLs for different DVR sources.
 * **Ultra-Lightweight Image:** Removed all `ffmpeg` and hardware-acceleration dependencies, resulting in a significantly smaller Docker footprint and near-zero CPU usage.
-* **Adjustable Tune Delays:** Configure exact buffer delays per channel to ensure the app is ready before the stream is captured.
 
 ## **Installation**
 
@@ -49,7 +49,8 @@ docker run -d \
 `http://<IP_OF_DOCKER_HOST>:5006/status`
 2. Use the web interface to:
 * **Add Your LinkPi Tuners:** Click "Add Tuner" and provide the Roku IP and LinkPi TS stream URL.
-* **Add Deep-Link Channels:** Click "Add Channel" and enter the friendly name, Roku App ID (e.g., `195316` for YouTube TV), Deep Link Content ID, and the Gracenote Station ID.
+* **Add Deep-Link Channels:** Click "Add Channel". Select your target app (YouTube TV or DirecTV) from the dropdown, enter the Deep Link Content ID, and add the Gracenote Station ID.
+* **Assign Playlists:** (Optional) Enter a group name like "Sports" or "YTTV" to group your channels.
 * **Set Tune Delays:** Adjust the delay (in seconds) to give the app enough time to load the video before the bridge starts proxying the stream.
 
 
@@ -57,9 +58,9 @@ docker run -d \
 
 ## **Channels DVR Setup**
 
-This lean bridge generates a single, unified M3U playlist file that handles both the stream routing and the guide data mapping.
+This lean bridge generates an M3U playlist file that handles both the stream routing and the guide data mapping.
 
-* **M3U URL:** `http://<IP_OF_DOCKER_HOST>:5006/channels.m3u`
+* **Master M3U URL:** `http://<IP_OF_DOCKER_HOST>:5006/channels.m3u`
 
 **To add to Channels DVR:**
 
@@ -68,11 +69,14 @@ This lean bridge generates a single, unified M3U playlist file that handles both
 3. Enter the M3U URL.
 4. Because the M3U includes the `tvc-guide-stationid` tags you configured in the web UI, Channels DVR will automatically download the correct guide data.
 
-### **Playlist Filtering (Optional)**
+### **Playlist Filtering (Creating Multiple Sources)**
 
-If you want to organize your channels into separate sources in Channels DVR, you can generate filtered M3U URLs by adding `?playlist=<playlist_name>` to the URL.
+If you used the **Playlist Group** field in the web UI to organize your channels, you can import them into Channels DVR as completely separate sources.
 
-* *Example:* `http://<IP_OF_DOCKER_HOST>:5006/channels.m3u?playlist=YTTV`
+To filter the M3U output, just add `?playlist=<YourGroupName>` to the end of the URL.
+
+* *Example 1 (Only YouTube TV Channels):* `http://<IP_OF_DOCKER_HOST>:5006/channels.m3u?playlist=YTTV`
+* *Example 2 (Only Sports Channels):* `http://<IP_OF_DOCKER_HOST>:5006/channels.m3u?playlist=Sports`
 
 ## **Configuration File (`roku_channels.json`)**
 
@@ -94,6 +98,7 @@ While it is highly recommended to manage your setup through the web interface, t
       "roku_app_id": "195316",
       "deep_link_content_id": "Gs-ILaF-HNw",
       "gracenote_id": "11594",
+      "playlist": "YTTV",
       "tune_delay": 3
     }
   ]
