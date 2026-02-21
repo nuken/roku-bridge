@@ -23,14 +23,14 @@
         .modal-content { background: var(--surface-color); margin: 5% auto; padding: 20px; width: 90%; max-width: 500px; border-radius: 8px; max-height: 85vh; overflow-y: auto; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; font-size: 0.9em; }
-        .form-group input { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white; box-sizing: border-box; }
+        .form-group input, .form-group select { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white; box-sizing: border-box; }
         #save-all-button { background-color: var(--success-color); width: 100%; margin-top: 20px; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1><span><i class="fa-solid fa-bolt"></i> Roku Bridge Lean <span style="font-size: 0.5em;">v{{ global_settings.app_version }}</span></span></h1>
-
+        
         <div class="top-actions">
             <button class="button" onclick="loadConfig()"><i class="fa-solid fa-sync"></i> Refresh Data</button>
             <a href="/remote" class="button">Remote</a>
@@ -49,7 +49,7 @@
         <h2><i class="fa-solid fa-tv"></i> Deep-Link Channels</h2>
         <div class="table-wrapper">
             <table>
-                <thead><tr><th>Name</th><th>App ID</th><th>Content ID</th><th>Gracenote ID</th><th>Delay</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Channel Name</th><th>Target App</th><th>Content ID</th><th>Gracenote ID</th><th>Delay</th><th>Actions</th></tr></thead>
                 <tbody id="channels-body"></tbody>
             </table>
         </div>
@@ -71,16 +71,24 @@
     </div></div>
 
     <div id="channel-modal" class="modal"><div class="modal-content">
-        <h3>Channel Deep-Link</h3>
+        <h3>Channel Deep-Link Configuration</h3>
         <form id="channel-form">
             <input type="hidden" id="channel-index">
-            <div class="form-group"><label>Friendly Name</label><input type="text" id="c-name" required></div>
-            <div class="form-group"><label>Internal ID (slug)</label><input type="text" id="c-id" required></div>
-            <div class="form-group"><label>Roku App ID</label><input type="text" id="c-app" placeholder="e.g. 195316 for YTTV" required></div>
-            <div class="form-group"><label>Content ID</label><input type="text" id="c-content" required></div>
-            <div class="form-group"><label>Gracenote Station ID</label><input type="text" id="c-gracenote" placeholder="e.g. 11594"></div>
-            <div class="form-group"><label>Playlist Name (Optional)</label><input type="text" id="c-playlist" placeholder="e.g. YTTV"></div>
-            <div class="form-group"><label>Tune Delay (Sec)</label><input type="number" id="c-delay" value="3"></div>
+            <div class="form-group"><label>Channel Name (e.g., ESPN)</label><input type="text" id="c-name" required></div>
+            <div class="form-group"><label>Channel ID (no spaces, e.g., espn_1)</label><input type="text" id="c-id" required></div>
+            
+            <div class="form-group">
+                <label>Streaming App</label>
+                <select id="c-app" required>
+                    <option value="195316">YouTube TV</option>
+                    <option value="140474">DirecTV Stream</option>
+                </select>
+            </div>
+            
+            <div class="form-group"><label>Content ID (The specific video ID to launch)</label><input type="text" id="c-content" required></div>
+            <div class="form-group"><label>Gracenote Station ID (For Channels DVR Guide)</label><input type="text" id="c-gracenote" placeholder="e.g. 11594"></div>
+            <div class="form-group"><label>Playlist Group (Optional)</label><input type="text" id="c-playlist" placeholder="e.g. Sports"></div>
+            <div class="form-group"><label>Tune Delay (Seconds to wait for app load)</label><input type="number" id="c-delay" value="3"></div>
             <button type="submit" class="button">Apply</button>
             <button type="button" class="button delete" onclick="closeModal('channel-modal')">Cancel</button>
         </form>
@@ -88,6 +96,13 @@
 
     <script>
         let config = { tuners: [], channels: [] };
+
+        // Helper function to show readable app names in the table
+        function getAppName(appId) {
+            if (appId === '195316') return 'YouTube TV';
+            if (appId === '140474') return 'DirecTV Stream';
+            return appId; // Fallback to raw ID if unknown
+        }
 
         async function loadConfig() {
             try {
@@ -114,9 +129,9 @@
                 <tr><td>${t.name}</td><td>${t.roku_ip}</td><td>${t.encoder_url}</td>
                 <td><button class="action-button edit" onclick="openTunerModal(${i})">Edit</button>
                 <button class="action-button delete" onclick="deleteItem('tuners',${i})">X</button></td></tr>`).join('');
-
+            
             document.getElementById('channels-body').innerHTML = (config.channels || []).map((c, i) => `
-                <tr><td>${c.name}</td><td>${c.roku_app_id}</td><td>${c.deep_link_content_id}</td><td>${c.gracenote_id || '-'}</td><td>${c.tune_delay}s</td>
+                <tr><td>${c.name}</td><td>${getAppName(c.roku_app_id)}</td><td>${c.deep_link_content_id}</td><td>${c.gracenote_id || '-'}</td><td>${c.tune_delay}s</td>
                 <td><button class="action-button edit" onclick="openChannelModal(${i})">Edit</button>
                 <button class="action-button delete" onclick="deleteItem('channels',${i})">X</button></td></tr>`).join('');
         }
@@ -150,12 +165,23 @@
                 const c = config.channels[idx];
                 document.getElementById('c-name').value = c.name;
                 document.getElementById('c-id').value = c.id;
-                document.getElementById('c-app').value = c.roku_app_id;
+                
+                // Set the dropdown value safely
+                let appSelect = document.getElementById('c-app');
+                if (Array.from(appSelect.options).some(opt => opt.value === c.roku_app_id)) {
+                    appSelect.value = c.roku_app_id;
+                } else {
+                    appSelect.value = "195316"; // Default to YTTV if missing
+                }
+                
                 document.getElementById('c-content').value = c.deep_link_content_id;
                 document.getElementById('c-gracenote').value = c.gracenote_id || "";
                 document.getElementById('c-playlist').value = c.playlist || "";
                 document.getElementById('c-delay').value = c.tune_delay;
-            } else { document.getElementById('channel-form').reset(); }
+            } else { 
+                document.getElementById('channel-form').reset(); 
+                document.getElementById('c-app').value = "195316"; // Set default for new channels
+            }
             document.getElementById('channel-modal').style.display = 'block';
         }
 
@@ -165,7 +191,7 @@
             const data = {
                 name: document.getElementById('c-name').value,
                 id: document.getElementById('c-id').value,
-                roku_app_id: document.getElementById('c-app').value,
+                roku_app_id: document.getElementById('c-app').value, // Gets the value from the dropdown
                 deep_link_content_id: document.getElementById('c-content').value,
                 gracenote_id: document.getElementById('c-gracenote').value,
                 playlist: document.getElementById('c-playlist').value,

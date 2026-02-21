@@ -4,27 +4,26 @@
       "name": "FOX",
       "id": "youtube_tv_fox",
       "roku_app_id": "195316",
-      "deep_link_content_id": "Gs-ILaF-HNw",
+      "deep_link_content_id": "rsn__vePnJc",
       "gracenote_id": "11594",
       "playlist": "",
       "tune_delay": 3
     },
     {
-      "name": "ESPN",
-      "id": "directv_espn",
-      "roku_app_id": "12345",
-      "deep_link_content_id": "espn-live-id",
-      "gracenote_id": "",
+      "deep_link_content_id": "HdNG0LamFtk",
+      "gracenote_id": "11207",
+      "id": "youtube_tv_usa",
+      "name": "USA",
       "playlist": "",
+      "roku_app_id": "195316",
       "tune_delay": 4
     }
   ],
   "tuners": [
     {
-      "encoder_url": "http://192.168.86.90/ts/1_0",
+      "encoder_url": "http://192.168.86.37:8090/stream1",
       "in_use": false,
       "name": "Roku1",
-      "priority": 1,
       "roku_ip": "192.168.86.35"
     }
   ]

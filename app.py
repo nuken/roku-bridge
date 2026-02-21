@@ -42,36 +42,42 @@ def load_config():
         logging.error(f"Error loading config: {e}")
 
 def execute_fast_tune(roku_ip, channel_data):
-    """Uses the ECP Search/Browse endpoint for instantaneous deep-linking."""
+    """Uses the ECP Launch endpoint for instantaneous deep-linking."""
     content_id = channel_data.get('deep_link_content_id')
     app_id = channel_data.get('roku_app_id')
 
     if content_id and app_id:
-        # Search/Browse triggers the app to launch directly into the media player
-        params = f"appId={app_id}&contentId={content_id}&mediaType=live&type=tv-channel"
-        url = f"http://{roku_ip}:8060/search/browse?{params}"
+        # The correct direct deep-link format for Roku ECP
+        url = f"http://{roku_ip}:8060/launch/{app_id}?contentId={content_id}&mediaType=live"
         try:
-            roku_session.post(url)
-            # Adjustable tune delay to allow the app player to buffer before streaming starts
-            time.sleep(channel_data.get("tune_delay", 2))
+            logging.info(f"Tuning {roku_ip} to app {app_id} with content {content_id}")
+            roku_session.post(url, timeout=2)
+            
+            # Adjustable tune delay to allow the app player to buffer before proxying starts
+            time.sleep(channel_data.get("tune_delay", 3))
         except Exception as e:
-            logging.error(f"Tuning failed: {e}")
+            logging.error(f"Tuning failed on {roku_ip}: {e}")
 
 def stream_generator(encoder_url, roku_ip, tuner):
     """Pure proxy generator optimized for LinkPi hardware."""
     try:
-        with requests.get(encoder_url, timeout=10, stream=True) as r:
+        # timeout=(5, 60) means 5s to connect, but waits up to 60s for video chunks
+        with requests.get(encoder_url, timeout=(5, 60), stream=True) as r:
             r.raise_for_status()
             for chunk in r.iter_content(chunk_size=8192):
-                yield chunk
+                if chunk:
+                    yield chunk
+    except requests.exceptions.ReadTimeout:
+        logging.warning(f"Stream from {encoder_url} timed out. The LinkPi may have stopped sending data.")
+    except Exception as e:
+        logging.error(f"Streaming Error from {encoder_url}: {e}")
     finally:
         # Release tuner and return to Home to clear the Roku player
         try:
             requests.post(f"http://{roku_ip}:8060/keypress/Home", timeout=2)
-        except Exception as e:
-            pass # Ignore connection errors on cleanup
-
-        # CRITICAL FIX: Mark the tuner as available again
+        except Exception:
+            pass # Ignore cleanup errors
+        
         with TUNER_LOCK:
             tuner['in_use'] = False
             logging.info(f"Released tuner at {roku_ip}")
