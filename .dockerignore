@@ -1,0 +1,16 @@
+# Git files
+.git
+.gitignore
+
+# GitHub Actions workflow files
+.github/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Documentation
+*.md
+
+# User-specific configuration (should not be in the image)
+roku_channels.json
