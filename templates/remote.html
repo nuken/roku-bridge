@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Android TV Remote</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <style>
+        :root { --bg-color: #2c2c2c; --surface-color: #3a3a3a; --primary-color: #7dd3fc; --text-color: #e0e0e0; }
+        body { font-family: sans-serif; background: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .remote-container { background: var(--surface-color); padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 300px; }
+        h1 { text-align: center; color: var(--primary-color); margin-top: 0; }
+        select { width: 100%; padding: 10px; margin-bottom: 20px; border-radius: 8px; background: #222; color: #fff; border: 1px solid #555; }
+        .grid { display: grid; gap: 15px; grid-template-columns: repeat(3, 1fr); }
+        .btn { background: #555; border: none; border-radius: 50%; width: 60px; height: 60px; font-size: 1.2em; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.1s; }
+        .btn:active { transform: scale(0.95); background: #777; }
+        .btn.ok { background: var(--primary-color); color: #222; font-weight: bold; }
+        .nav-link { margin-bottom: 10px; color: var(--primary-color); text-decoration: none; align-self: flex-end; }
+    </style>
+</head>
+<body>
+    <a href="/status" class="nav-link"><i class="fa-solid fa-arrow-left"></i> Back to Status</a>
+    
+    <div class="remote-container">
+        <h1><i class="fa-brands fa-android"></i> Remote</h1>
+        
+        <select id="device-select">
+            <option value="">Loading devices...</option>
+        </select>
+
+        <div class="grid">
+            <button class="btn" onclick="key('Back')"><i class="fa-solid fa-arrow-left"></i></button>
+            <button class="btn" onclick="key('Home')"><i class="fa-solid fa-house"></i></button>
+            <button class="btn" onclick="key('Info')"><i class="fa-solid fa-info"></i></button>
+
+            <button class="btn" style="visibility:hidden"></button>
+            <button class="btn" onclick="key('Up')"><i class="fa-solid fa-chevron-up"></i></button>
+            <button class="btn" style="visibility:hidden"></button>
+            
+            <button class="btn" onclick="key('Left')"><i class="fa-solid fa-chevron-left"></i></button>
+            <button class="btn ok" onclick="key('Select')">OK</button>
+            <button class="btn" onclick="key('Right')"><i class="fa-solid fa-chevron-right"></i></button>
+
+            <button class="btn" style="visibility:hidden"></button>
+            <button class="btn" onclick="key('Down')"><i class="fa-solid fa-chevron-down"></i></button>
+            <button class="btn" style="visibility:hidden"></button>
+
+            <button class="btn" onclick="key('Rev')"><i class="fa-solid fa-backward"></i></button>
+            <button class="btn" onclick="key('Play')"><i class="fa-solid fa-play"></i></button>
+            <button class="btn" onclick="key('Fwd')"><i class="fa-solid fa-forward"></i></button>
+        </div>
+    </div>
+
+    <script>
+        async function loadDevices() {
+            try {
+                // The new app.py exposes devices via /api/config or /api/status
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                const sel = document.getElementById('device-select');
+                sel.innerHTML = '';
+                
+                if (data.tuners.length === 0) {
+                    sel.innerHTML = '<option value="">No devices found</option>';
+                    return;
+                }
+
+                data.tuners.forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t.device_ip;
+                    opt.text = t.name;
+                    sel.appendChild(opt);
+                });
+            } catch(e) {
+                console.error(e);
+                document.getElementById('device-select').innerHTML = '<option>Error loading</option>';
+            }
+        }
+
+        async function key(k) {
+            const ip = document.getElementById('device-select').value;
+            if(!ip) { alert('No device selected'); return; }
+            
+            // Call the ADB endpoint
+            await fetch(`/remote/keypress/${ip}/${k}`, { method: 'POST' });
+        }
+
+        window.onload = loadDevices;
+    </script>
+</body>
+</html>
