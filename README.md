@@ -32,7 +32,7 @@ The application is distributed as a multi-architecture Docker image, ready to ru
 Open a terminal or PowerShell and pull the latest image from Docker Hub. For the new on-demand streaming version:
 
 ```
-docker pull rcvaughn2/roku-ecp-tuner
+docker pull rcvaughn2/roku-ecp-tuner:xmguy
 ```
 
 ### **Step 2: Run the Docker Container**
@@ -45,7 +45,7 @@ docker run -d  \
 -p 5006:5000  \
 -v roku-bridge-config:/app/config  \
 --restart unless-stopped  \
-rcvaughn2/roku-ecp-tuner
+rcvaughn2/roku-ecp-tuner:xmguy
 ```
 
 **Note on GPU Acceleration (Linux):** If you need hardware acceleration for the `reencode` mode, add the `--device=/dev/dri` flag to the `docker run` command.
@@ -160,5 +160,6 @@ While all settings can be managed through the web interface, the configuration i
 ]
 
 ```
+
 
 
