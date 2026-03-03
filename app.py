@@ -122,23 +122,45 @@ def release_tuner(tuner_ip):
             del PREVIEW_SESSIONS[tuner_ip]
             logging.info(f"Cleared preview session for tuner {tuner_ip}")
 
+    # --- UPDATED RELEASE LOGIC ---
+    tuner_to_release = None
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
                 if tuner.get('in_use') or was_in_preview:
-                    tuner['in_use'] = False
-                    logging.info(f"Released tuner: {tuner.get('name')}. Sending Home keypress.")
-                    try:
-                        # Send Home keypress multiple times for reliability
-                        for _ in range(3):
-                            roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
-                            time.sleep(0.2)
-                    except requests.exceptions.RequestException as e:
-                        logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
+                    tuner['in_use'] = False # Signals background threads to abort
+                    tuner_to_release = tuner
                 break
 
-def send_key_sequence(device_ip, keys):
+    if tuner_to_release:
+        # Give the background thread a half-second to notice the flag change and cleanly abort
+        time.sleep(0.5)
+
+        exit_seq = tuner_to_release.get('last_exit_sequence')
+        if exit_seq:
+            logging.info(f"Sending custom exit sequence to {tuner_ip}")
+            # Use ignore_abort=True so this sequence bypasses the safety check
+            send_key_sequence(tuner_ip, exit_seq, ignore_abort=True)
+
+        logging.info(f"Released tuner: {tuner_to_release.get('name')}. Sending Home keypress.")
+        try:
+            for _ in range(3):
+                roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
+                time.sleep(0.2)
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
+
+def send_key_sequence(device_ip, keys, ignore_abort=False):
     for i, key in enumerate(keys):
+        # --- ADDED MID-TUNING CANCEL CHECK ---
+        if not ignore_abort:
+            with TUNER_LOCK:
+                tuner = next((t for t in TUNERS if t.get('roku_ip') == device_ip), None)
+                if tuner and not tuner.get('in_use'):
+                    logging.info(f"Aborting key sequence for {device_ip} because tuner was released.")
+                    return False
+        # -------------------------------------
+
         try:
             if isinstance(key, dict) and 'wait' in key:
                 time.sleep(float(key['wait']))
@@ -146,20 +168,19 @@ def send_key_sequence(device_ip, keys):
             if isinstance(key, str) and key.lower().startswith('wait='):
                 try: duration = float(key.split('=')[1]); time.sleep(duration); continue
                 except (ValueError, IndexError): logging.error(f"Invalid wait command: {key}"); continue
-            
+
             safe_key = f"Lit_{urllib.parse.quote(key)}" if len(key) == 1 else key
             roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
             if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
-            
+
             # Use a configurable delay if provided in the channel data, otherwise default
             custom_delay = next((float(k.split('=')[1]) for k in keys[i+1:] if isinstance(k, str) and k.startswith('delay=')), 0.5)
             time.sleep(custom_delay)
 
         except requests.exceptions.RequestException as e:
             logging.error(f"Failed to send key '{key}' to {device_ip}: {e}")
-            # --- NEW: Retry mechanism ---
-            for attempt in range(2): # Retry up to 2 times
-                time.sleep(1) # Wait before retrying
+            for attempt in range(2):
+                time.sleep(1)
                 try:
                     roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
                     logging.info(f"Successfully sent key '{key}' on retry {attempt + 1}")
@@ -167,7 +188,7 @@ def send_key_sequence(device_ip, keys):
                 except requests.exceptions.RequestException:
                     if attempt == 1:
                         logging.error(f"Failed to send key '{key}' after multiple retries.")
-                        return False # Abort sequence on persistent failure
+                        return False
     return True
 
 
@@ -272,6 +293,7 @@ def stream_channel(channel_id):
     if not channel_data:
         release_tuner(locked_tuner['roku_ip'])
         return "Channel not found.", 404
+    locked_tuner['last_exit_sequence'] = channel_data.get('exit_sequence')
     executor.submit(execute_tuning_in_background, locked_tuner['roku_ip'], channel_data)
     if channel_data.get('keep_alive_enabled') and channel_data.get('keep_alive_key'):
         interval = channel_data.get('keep_alive_interval', 225)
