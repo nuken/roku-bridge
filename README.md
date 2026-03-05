@@ -1,6 +1,6 @@
 # **Roku Channels Bridge**
 
-**Release: Beta 4.5.6**
+**Release: Beta 4.5.7**
 
 [**Official Configuration Guide**](https://tuner.ct.ws)
 
@@ -15,6 +15,8 @@ This setup allows you to use streaming service channels (like those from YouTube
   * **Seamless Integration:** Adds Roku-based channels directly into your Channels DVR guide.
   * **On-Demand App Streaming:** A dedicated **Pre-Tuning** page allows you to launch any on-demand app, navigate to your content, and send the final video stream directly to Channels DVR, solving stream delay issues.
   * **Advanced Tuning Methods:** Supports direct **Deep Linking**, custom **Key-Sequence** tuning, and an extensible **Plugin System** for apps that require complex navigation.
+  * **Smart Mid-Tuning Cancellation:** Instantly aborts remote control commands if you tune away or stop a stream before the initial tuning sequence finishes, preventing your Roku from executing stray keypresses on the home screen.
+  * **Custom Exit Sequences:** Define specific keypresses to execute when a stream stops, allowing stateful apps (like Spectrum) to close gracefully and reliably return to a clean state.
   * **Hide the Tuning Process:** Use the **Blanking Duration** feature to show a black screen while the Roku tunes in the background, providing a seamless, professional viewing experience.
   * **Triple M3U Support:** Generates three separate M3U playlists—one for **Gracenote**, one for custom **XMLTV/EPG** data, and a new one for **On-Demand Apps**.
   * **Web-Based Management:** A built-in **Status Page** to monitor your devices and manage your entire configuration with an intuitive UI.
@@ -31,21 +33,32 @@ The application is distributed as a multi-architecture Docker image, ready to ru
 
 Open a terminal or PowerShell and pull the latest image from Docker Hub. For the new on-demand streaming version:
 
+
 ```
+
 docker pull rcvaughn2/roku-ecp-tuner:xmguy
+
 ```
 
 ### **Step 2: Run the Docker Container**
 
 Run the container using the command below. This command creates a persistent Docker volume named `roku-bridge-config` where your `roku_channels.json` and plugin files will be safely stored.
 
+
 ```
-docker run -d  \
---name roku-channels-bridge  \
--p 5006:5000  \
--v roku-bridge-config:/app/config  \
---restart unless-stopped  \
+
+docker run -d
+
+--name roku-channels-bridge
+
+-p 5006:5000
+
+-v roku-bridge-config:/app/config
+
+--restart unless-stopped
+
 rcvaughn2/roku-ecp-tuner:xmguy
+
 ```
 
 **Note on GPU Acceleration (Linux):** If you need hardware acceleration for the `reencode` mode, add the `--device=/dev/dri` flag to the `docker run` command.
@@ -120,7 +133,7 @@ This feature allows you to stream content from any non-live TV app (like Max, Ne
 
 ## **Advanced Tuning Methods (For Live TV)**
 
-For apps that don't support direct deep-linking, you have two powerful options.
+For apps that don't support direct deep-linking, you have three powerful options.
 
 ### **1. Key Sequence Tuning**
 
@@ -133,15 +146,34 @@ Define a sequence of remote control commands to navigate to the correct channel 
 
 For even more complex tuning logic, you can use app-specific Python plugins.
 
+### **3. Custom Exit Sequences**
+
+Some streaming apps (like Spectrum) remember exactly where you left off. If you force-close them, they can launch in a weird state the next time you tune in. You can define a custom `exit_sequence` for any channel to gracefully back out of the app before returning to the home screen.
+
+To use this feature, manually edit your `roku_channels.json` file to add the sequence. For example:
+
+```json
+{
+  "id": "spectrum_local",
+  "name": "Spectrum Channel",
+  "roku_app_id": "12345",
+  "key_sequence": ["wait=5", "Down", "Select"],
+  "exit_sequence": ["Back", "Back", "Up", "Select"]
+}
+
+```
+
+*(Note: If no `exit_sequence` is defined, the bridge defaults to its standard safety behavior of pressing the "Home" button 3 times).*
+
 ## **Configuration File (`roku_channels.json`)**
 
 While all settings can be managed through the web interface, the configuration is stored in a `roku_channels.json` file.
 
 ### **`tuners` Section**
 
-  * **`name`**: A friendly name for the device pair.
-  * **`roku_ip`**: The IP address of the Roku device.
-  * **`encoder_url`**: The full URL of the video stream from the HDMI encoder.
+* **`name`**: A friendly name for the device pair.
+* **`roku_ip`**: The IP address of the Roku device.
+* **`encoder_url`**: The full URL of the video stream from the HDMI encoder.
 
 ### **`ondemand_apps` Section**
 
@@ -160,6 +192,4 @@ While all settings can be managed through the web interface, the configuration i
 ]
 
 ```
-
-
 

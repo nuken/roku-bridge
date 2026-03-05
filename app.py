@@ -20,7 +20,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.6"
+APP_VERSION = "4.5.7"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -141,14 +141,15 @@ def release_tuner(tuner_ip):
             logging.info(f"Sending custom exit sequence to {tuner_ip}")
             # Use ignore_abort=True so this sequence bypasses the safety check
             send_key_sequence(tuner_ip, exit_seq, ignore_abort=True)
-
-        logging.info(f"Released tuner: {tuner_to_release.get('name')}. Sending Home keypress.")
-        try:
-            for _ in range(3):
-                roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
-                time.sleep(0.2)
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
+        else:
+            # ONLY send the default Home keypresses if there was NO custom exit sequence
+            logging.info(f"Released tuner: {tuner_to_release.get('name')}. Sending default Home keypress.")
+            try:
+                for _ in range(3):
+                    roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
+                    time.sleep(0.2)
+            except requests.exceptions.RequestException as e:
+                logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
 
 def send_key_sequence(device_ip, keys, ignore_abort=False):
     for i, key in enumerate(keys):
