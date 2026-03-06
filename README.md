@@ -47,16 +47,11 @@ Run the container using the command below. This command creates a persistent Doc
 
 ```
 
-docker run -d
-
---name roku-channels-bridge
-
--p 5006:5000
-
--v roku-bridge-config:/app/config
-
---restart unless-stopped
-
+docker run -d \
+--name roku-channels-bridge \
+-p 5006:5000 \
+-v roku-bridge-config:/app/config \
+--restart unless-stopped \
 rcvaughn2/roku-ecp-tuner:xmguy
 
 ```
@@ -192,4 +187,5 @@ While all settings can be managed through the web interface, the configuration i
 ]
 
 ```
+
 
