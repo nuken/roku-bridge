@@ -271,15 +271,29 @@ def remote_keypress(device_ip, key):
 # --- Config Management ---
 @app.route('/api/config', methods=['GET', 'POST'])
 def api_config():
+    global TUNERS, CHANNELS
     if request.method == 'POST':
         try:
             new_config = request.get_json()
-            with open(CONFIG_FILE_PATH, 'w') as f: json.dump(new_config, f, indent=2)
+            with open(CONFIG_FILE_PATH, 'w') as f: 
+                json.dump(new_config, f, indent=2)
+            
+            # Save the current streaming states before reloading
+            old_tuners_state = {t['device_ip']: t.get('in_use', False) for t in TUNERS}
+            
             load_config()
+            
+            # Restore the streaming states so streams don't look idle if config is saved
+            for t in TUNERS:
+                if t['device_ip'] in old_tuners_state:
+                    t['in_use'] = old_tuners_state[t['device_ip']]
+                    
             return jsonify({"message": "Saved"}), 200
-        except Exception as e: return jsonify({"error": str(e)}), 500
+        except Exception as e: 
+            return jsonify({"error": str(e)}), 500
     else:
-        with open(CONFIG_FILE_PATH, 'r') as f: return jsonify(json.load(f))
+        # Return the LIVE memory state so the frontend knows if a tuner is in_use
+        return jsonify({"tuners": TUNERS, "channels": CHANNELS})
 
 if __name__ == '__main__':
     load_config()
