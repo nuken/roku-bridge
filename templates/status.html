@@ -25,7 +25,6 @@
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; }
         .form-group input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background-color: #222; color: white; box-sizing: border-box; }
-        .m3u-url { background-color: var(--border-color); padding: 5px 10px; border-radius: 6px; font-size: 0.9em; margin-left: 10px; color: white; text-decoration: none;}
     </style>
 </head>
 <body>
@@ -45,7 +44,7 @@
                 <tbody id="tuners-table-body"></tbody>
             </table>
         </div>
-        <button class="button" onclick="openTunerModal()"><i class="fa-solid fa-plus"></i> Add Device</button>
+        <button class="button" onclick="openTunerModal()" style="margin-top: 10px;"><i class="fa-solid fa-plus"></i> Add Device</button>
 
         <h2 style="margin-top: 30px;"><i class="fa-solid fa-tv"></i> Channels</h2>
         <div class="table-wrapper">
@@ -54,7 +53,7 @@
                 <tbody id="channels-table-body"></tbody>
             </table>
         </div>
-        <button class="button" onclick="openChannelModal()"><i class="fa-solid fa-plus"></i> Add Channel</button>
+        <button class="button" onclick="openChannelModal()" style="margin-top: 10px;"><i class="fa-solid fa-plus"></i> Add Channel</button>
 
         <h2 style="margin-top: 30px;"><i class="fa-solid fa-floppy-disk"></i> Config</h2>
         <div style="display:flex; gap:10px;">
@@ -70,6 +69,7 @@
                 <div class="form-group"><label>Name</label><input type="text" id="tuner-name" required></div>
                 <div class="form-group"><label>Device IP (e.g. 192.168.1.50)</label><input type="text" id="tuner-ip" required></div>
                 <div class="form-group"><label>Encoder URL (e.g. http://192.168.1.90/ts/1_0)</label><input type="text" id="tuner-url" required></div>
+                <div class="form-group"><label>Priority (1 = Highest, 99 = Lowest)</label><input type="number" id="tuner-priority" value="99" required></div>
                 <button type="submit" class="button">Save</button>
                 <button type="button" class="button" style="background:#666" onclick="closeModal('tuner-modal')">Cancel</button>
             </form>
@@ -102,11 +102,7 @@
         }
 
         async function fetchStatus() {
-            const res = await fetch('/api/status');
-            const data = await res.json();
-            // Update status icons dynamically would go here, 
-            // but for simplicity we just reload the config data which is static
-            // The status check logic is handled in Python, this just refreshes UI
+            // Re-fetch from api/config since it now includes the live memory states (in_use)
             loadConfig(); 
         }
 
@@ -115,10 +111,10 @@
             const tBody = document.getElementById('tuners-table-body');
             tBody.innerHTML = config.tuners.map((t, i) => `
                 <tr>
-                    <td>${t.name}</td>
+                    <td>${t.name} <span style="font-size: 0.8em; color: #aaa;">(Pri: ${t.priority || 99})</span></td>
                     <td>${t.device_ip}</td>
                     <td>${t.encoder_url}</td>
-                    <td>${t.in_use ? '<span style="color:orange">Streaming</span>' : '<span style="color:green">Idle</span>'}</td>
+                    <td>${t.in_use ? '<span style="color:orange; font-weight:bold;"><i class="fa-solid fa-play"></i> Streaming</span>' : '<span style="color:green"><i class="fa-solid fa-check"></i> Idle</span>'}</td>
                     <td>
                         <button class="action-button" onclick="editTuner(${i})"><i class="fa-solid fa-pencil"></i></button>
                         <button class="action-button delete" onclick="delTuner(${i})"><i class="fa-solid fa-trash"></i></button>
@@ -126,28 +122,40 @@
                 </tr>
             `).join('');
 
-            // Channels
+            // Channels (Now with Drag & Drop)
             const cBody = document.getElementById('channels-table-body');
             cBody.innerHTML = config.channels.map((c, i) => `
-                <tr>
-                    <td>${c.name}</td>
+                <tr draggable="true" ondragstart="dragStart(event, ${i})" ondragover="dragOver(event)" ondrop="drop(event, ${i})" ondragend="dragEnd(event)">
+                    <td style="cursor: grab;" title="Drag to reorder">
+                        <i class="fa-solid fa-grip-vertical" style="color: #666; margin-right: 10px;"></i>${c.name}
+                    </td>
                     <td>${c.id}</td>
                     <td>${c.deep_link_content_id}</td>
                     <td>
-                        <button class="action-button" onclick="editChannel(${i})"><i class="fa-solid fa-pencil"></i></button>
-                        <button class="action-button delete" onclick="delChannel(${i})"><i class="fa-solid fa-trash"></i></button>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <button class="action-button" title="Move Up" style="background-color: #4b5563;" onclick="moveChannel(${i}, -1)" ${i === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}><i class="fa-solid fa-arrow-up"></i></button>
+                            <button class="action-button" title="Move Down" style="background-color: #4b5563;" onclick="moveChannel(${i}, 1)" ${i === config.channels.length - 1 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}><i class="fa-solid fa-arrow-down"></i></button>
+                            <button class="action-button" onclick="editChannel(${i})"><i class="fa-solid fa-pencil"></i></button>
+                            <button class="action-button delete" onclick="delChannel(${i})"><i class="fa-solid fa-trash"></i></button>
+                        </div>
                     </td>
                 </tr>
             `).join('');
         }
 
         // --- Tuner Logic ---
-        function openTunerModal() { document.getElementById('tuner-form').reset(); document.getElementById('tuner-index').value = '-1'; document.getElementById('tuner-modal').style.display='block'; }
+        function openTunerModal() { 
+            document.getElementById('tuner-form').reset(); 
+            document.getElementById('tuner-index').value = '-1'; 
+            document.getElementById('tuner-priority').value = '99';
+            document.getElementById('tuner-modal').style.display='block'; 
+        }
         function editTuner(i) {
             const t = config.tuners[i];
             document.getElementById('tuner-name').value = t.name;
             document.getElementById('tuner-ip').value = t.device_ip;
             document.getElementById('tuner-url').value = t.encoder_url;
+            document.getElementById('tuner-priority').value = t.priority || 99;
             document.getElementById('tuner-index').value = i;
             document.getElementById('tuner-modal').style.display='block';
         }
@@ -158,9 +166,16 @@
                 name: document.getElementById('tuner-name').value,
                 device_ip: document.getElementById('tuner-ip').value,
                 encoder_url: document.getElementById('tuner-url').value,
-                priority: i === -1 ? 99 : (config.tuners[i].priority || 99)
+                priority: parseInt(document.getElementById('tuner-priority').value) || 99
             };
+            // Preserve streaming state if editing an active tuner
+            if(i !== -1 && config.tuners[i].in_use) data.in_use = true;
+
             if(i === -1) config.tuners.push(data); else config.tuners[i] = data;
+            
+            // Re-sort the tuners array live based on priority
+            config.tuners.sort((a, b) => (a.priority || 99) - (b.priority || 99));
+            
             renderTables(); closeModal('tuner-modal');
         };
         function delTuner(i) { if(confirm('Delete this tuner?')) { config.tuners.splice(i, 1); renderTables(); } }
@@ -192,10 +207,50 @@
         };
         function delChannel(i) { if(confirm('Delete this channel?')) { config.channels.splice(i, 1); renderTables(); } }
 
+        // === Channel Sorting Logic (Drag & Drop + Arrows) ===
+        function moveChannel(idx, direction) {
+            if (idx + direction < 0 || idx + direction >= config.channels.length) return;
+            const temp = config.channels[idx];
+            config.channels[idx] = config.channels[idx + direction];
+            config.channels[idx + direction] = temp;
+            renderTables();
+        }
+
+        let draggedIdx = null;
+
+        function dragStart(e, idx) {
+            draggedIdx = idx;
+            e.dataTransfer.effectAllowed = 'move';
+            setTimeout(() => e.target.style.opacity = '0.4', 0);
+        }
+
+        function dragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+
+        function drop(e, targetIdx) {
+            e.preventDefault();
+            if (draggedIdx === null || draggedIdx === targetIdx) return;
+            const movedItem = config.channels.splice(draggedIdx, 1)[0];
+            config.channels.splice(targetIdx, 0, movedItem);
+            renderTables();
+        }
+
+        function dragEnd(e) {
+            e.target.style.opacity = '1';
+            draggedIdx = null;
+        }
+
         // --- Global ---
         function closeModal(id) { document.getElementById(id).style.display='none'; }
+        
         async function saveConfigToServer() {
-            await fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+            await fetch('/api/config', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify(config) 
+            });
             alert('Configuration Saved!');
         }
 
