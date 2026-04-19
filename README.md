@@ -1,4 +1,6 @@
-# **Roku Channels Bridge**
+# **Roku Channels Bridge** 
+
+# There is a bug/issue with YouTube TV Build 237 that is not allowing Deeplinks tuning. I am working on a fix
 
 **Release: Beta 4.5.6**
 
