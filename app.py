@@ -503,7 +503,7 @@ def upload_config_merge():
 def sync_plugins():
     try:
         # Fetching directly from the main repo branch
-        repo_api_url = "https://api.github.com/repos/rcvaughn2/roku-ecp-tuner/contents/plugins"
+        repo_api_url = "https://api.github.com/repos/nuken/roku-bridge/contents/plugins"
         response = requests.get(repo_api_url, timeout=10)
         response.raise_for_status()
         files = response.json()
