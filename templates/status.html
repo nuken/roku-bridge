@@ -158,6 +158,12 @@
         
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-file-import"></i> Backup & Restore</h2></div>
         <div class="backup-restore"><button class="button" onclick="downloadConfig()"><i class="fa-solid fa-download"></i> Download Configuration</button><hr style="border-color: var(--border-color); margin: 20px 0;"><form id="upload-form" method="post" enctype="multipart/form-data"><input type="file" name="file" id="file-input" required><button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload</button></form></div>
+
+        <hr style="border-color: var(--border-color); margin: 20px 0;">
+<form id="upload-merge-form" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" id="merge-file-input" required>
+    <button type="submit" class="button edit"><i class="fa-solid fa-code-merge"></i> Merge Config</button>
+</form>
         
         <div class="section-header" style="padding-bottom: 10px; margin-top: 20px;"><h2><i class="fa-solid fa-puzzle-piece"></i> Plugin Management</h2></div>
         <div class="backup-restore">
@@ -165,6 +171,9 @@
             <form id="upload-plugin-form" method="post" enctype="multipart/form-data">
                 <input type="file" name="file" id="plugin-file-input" required accept=".py">
                 <button type="submit" class="button"><i class="fa-solid fa-upload"></i> Upload Plugin</button>
+                <button class="button" onclick="syncPlugins()" style="margin-top: 15px; background-color: var(--success-color);">
+    <i class="fa-solid fa-cloud-arrow-down"></i> Sync Plugins from Repo
+</button>
             </form>
         </div>
 
@@ -638,6 +647,31 @@
                 }
             }, true);
         }
+
+        // Config Merge Handler
+document.getElementById('upload-merge-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    try {
+        const response = await fetch(window.location.origin + '/upload_config_merge', { method: 'POST', body: formData });
+        const msg = await response.text();
+        showNotification(msg, response.ok ? 'success' : 'error');
+        if (response.ok) setTimeout(() => window.location.reload(), 1500);
+    } catch (error) { showNotification('Merge failed: ' + error.message, 'error'); }
+});
+
+// Plugin Sync Handler
+async function syncPlugins() {
+    showNotification("Contacting GitHub repository...", "success");
+    try {
+        const response = await fetch(window.location.origin + '/api/plugins/sync', { method: 'POST' });
+        const result = await response.json();
+        showNotification(result.message, result.status);
+        if (result.status === 'success') setTimeout(() => window.location.reload(), 2000);
+    } catch (error) {
+        showNotification('Plugin sync failed: ' + error.message, 'error');
+    }
+}
 
         document.addEventListener('DOMContentLoaded', () => {
             fetchStatus(); loadConfig(); loadPlugins();
