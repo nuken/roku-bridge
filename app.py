@@ -503,7 +503,8 @@ def upload_config_merge():
 def sync_plugins():
     try:
         # Fetching directly from the main repo branch
-        repo_api_url = "https://api.github.com/repos/nuken/roku-bridge/contents/plugins"
+        # repo_api_url = "https://api.github.com/repos/nuken/roku-bridge/contents/plugins"
+        repo_api_url = "https://api.github.com/repos/babsonnexus/hdmi-encoder-native-apps/contents/roku_bridge_native/plugins"
         response = requests.get(repo_api_url, timeout=10)
         response.raise_for_status()
         files = response.json()
@@ -541,6 +542,67 @@ def upload_config():
         return "Configuration updated successfully. Server is reloading...", 200
     except Exception as e:
         return f"Error processing config file: {e}", 400
+
+@app.route('/api/stations/babsonnexus/list', methods=['GET'])
+def list_babsonnexus_stations():
+    """Fetches the list of available station JSON files from the repository."""
+    try:
+        repo_api_url = "https://api.github.com/repos/babsonnexus/hdmi-encoder-native-apps/contents/roku_bridge_native/stations"
+        response = requests.get(repo_api_url, timeout=10)
+        response.raise_for_status()
+        files = response.json()
+
+        # Filter for JSON files and return just the names and direct download URLs
+        station_files = [{"name": f["name"], "download_url": f["download_url"]}
+                         for f in files if f['name'].endswith('.json') and f['type'] == 'file']
+
+        return jsonify({"status": "success", "files": station_files})
+    except Exception as e:
+        logging.error(f"Failed to fetch station list: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/stations/babsonnexus/import', methods=['POST'])
+def import_babsonnexus_stations():
+    """Downloads and merges only the user-selected station files."""
+    try:
+        selected_urls = request.json.get('urls', [])
+        if not selected_urls:
+            return jsonify({"status": "error", "message": "No stations selected."}), 400
+
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            current_config = json.load(f)
+
+        current_channels = {c.get('id'): c for c in current_config.get('channels', []) if c.get('id')}
+        current_epg = {c.get('id'): c for c in current_config.get('epg_channels', []) if c.get('id')}
+
+        downloaded = 0
+        for url in selected_urls:
+            station_res = requests.get(url, timeout=10)
+            if station_res.status_code == 200:
+                station_data = station_res.json()
+
+                for ch in station_data.get('channels', []):
+                    if ch.get('id'): current_channels[ch['id']] = ch
+                for epg in station_data.get('epg_channels', []):
+                    if epg.get('id'): current_epg[epg['id']] = epg
+
+                downloaded += 1
+
+        current_config['channels'] = list(current_channels.values())
+        current_config['epg_channels'] = list(current_epg.values())
+
+        with open(CONFIG_FILE_PATH, 'w') as f:
+            json.dump(current_config, f, indent=2)
+
+        load_config()
+        os.kill(os.getppid(), signal.SIGHUP)
+        return jsonify({
+            "status": "success",
+            "message": f"Successfully merged {downloaded} station files. Server reloading..."
+        })
+    except Exception as e:
+        logging.error(f"Babsonnexus station import failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/upload_plugin', methods=['POST'])
 def upload_plugin():
@@ -644,7 +706,6 @@ def remote_keypress(device_ip, key):
         return jsonify({"status": "error", "message": "Device not found or not in a session."}), 404
     try:
         roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}", timeout=5)
-        return jsonify({"status": "success"})
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
