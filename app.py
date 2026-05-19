@@ -20,7 +20,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.6"
+APP_VERSION = "4.5.7"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -131,7 +131,7 @@ def release_tuner(tuner_ip):
                     try:
                         # Send Home keypress multiple times for reliability
                         for _ in range(3):
-                            roku_session.post(f"http://{tuner_ip}:8060/keypress/Home")
+                            roku_session.post(f"http://{tuner_ip}:8060/keypress/Home", timeout=2)
                             time.sleep(0.2)
                     except requests.exceptions.RequestException as e:
                         logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
@@ -148,7 +148,7 @@ def send_key_sequence(device_ip, keys):
                 except (ValueError, IndexError): logging.error(f"Invalid wait command: {key}"); continue
             
             safe_key = f"Lit_{urllib.parse.quote(key)}" if len(key) == 1 else key
-            roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
+            roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}", timeout=5)
             if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
             
             # Use a configurable delay if provided in the channel data, otherwise default
@@ -161,7 +161,7 @@ def send_key_sequence(device_ip, keys):
             for attempt in range(2): # Retry up to 2 times
                 time.sleep(1) # Wait before retrying
                 try:
-                    roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}")
+                    roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}", timeout=5)
                     logging.info(f"Successfully sent key '{key}' on retry {attempt + 1}")
                     break
                 except requests.exceptions.RequestException:
@@ -185,7 +185,7 @@ def execute_tuning_in_background(roku_ip, channel_data):
     try:
         if DEBUG_LOGGING_ENABLED: logging.info(f"Tuning to actual channel {channel_data['name']}...")
         launch_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
-        roku_session.post(launch_url)
+        roku_session.post(launch_url, timeout=5)
         time.sleep(channel_data.get("tune_delay", 1))
         plugin_script = channel_data.get('plugin_script')
         key_sequence = channel_data.get('key_sequence')
@@ -200,7 +200,7 @@ def execute_tuning_in_background(roku_ip, channel_data):
             if content_id:
                 media_type = channel_data.get('media_type', 'live')
                 params = f"?contentId={content_id}&mediaType={media_type}"
-                roku_session.post(f"{launch_url}{params}")
+                roku_session.post(f"{launch_url}{params}", timeout=5)
         if channel_data.get('needs_select_keypress'):
             time.sleep(1)
             send_key_sequence(roku_ip, ["Select"])
@@ -463,6 +463,70 @@ def api_config():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+@app.route('/upload_config_merge', methods=['POST'])
+def upload_config_merge():
+    if 'file' not in request.files: return "No file part", 400
+    file = request.files['file']
+    if file.filename == '' or not file.filename.endswith('.json'): return "Invalid file", 400
+    try:
+        new_config = json.load(file)
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            current_config = json.load(f)
+
+        # Merge lists by checking for existing IDs/Names
+        for key in ['tuners', 'channels', 'epg_channels', 'ondemand_apps']:
+            if key in new_config and isinstance(new_config[key], list):
+                current_list = current_config.get(key, [])
+                existing = {item.get('id', item.get('name')): item for item in current_list if item.get('id') or item.get('name')}
+                for item in new_config[key]:
+                    identifier = item.get('id', item.get('name'))
+                    if identifier:
+                        existing[identifier] = item
+                    else:
+                        current_list.append(item)
+                current_config[key] = list(existing.values())
+
+        # Merge on-demand settings
+        if 'ondemand_settings' in new_config:
+            current_config['ondemand_settings'] = {**current_config.get('ondemand_settings', {}), **new_config['ondemand_settings']}
+
+        with open(CONFIG_FILE_PATH, 'w') as f:
+            json.dump(current_config, f, indent=2)
+
+        load_config()
+        os.kill(os.getppid(), signal.SIGHUP)
+        return "Configuration merged successfully. Server is reloading...", 200
+    except Exception as e:
+        return f"Error processing config merge: {e}", 400
+
+@app.route('/api/plugins/sync', methods=['POST'])
+def sync_plugins():
+    try:
+        # Fetching directly from the main repo branch
+        repo_api_url = "https://api.github.com/repos/nuken/roku-bridge/contents/plugins"
+        response = requests.get(repo_api_url, timeout=10)
+        response.raise_for_status()
+        files = response.json()
+
+        plugins_dir = os.path.join(os.path.dirname(__file__), 'plugins')
+        os.makedirs(plugins_dir, exist_ok=True)
+        downloaded = 0
+
+        for file_info in files:
+            if file_info['name'].endswith('_plugin.py') and file_info['type'] == 'file':
+                raw_url = file_info['download_url']
+                plugin_res = requests.get(raw_url, timeout=10)
+                if plugin_res.status_code == 200:
+                    save_path = os.path.join(plugins_dir, file_info['name'])
+                    with open(save_path, 'wb') as f:
+                        f.write(plugin_res.content)
+                    downloaded += 1
+
+        os.kill(os.getppid(), signal.SIGHUP)
+        return jsonify({"status": "success", "message": f"Successfully synced {downloaded} plugins. Server is reloading..."})
+    except Exception as e:
+        logging.error(f"Plugin sync failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/upload_config', methods=['POST'])
 def upload_config():
@@ -477,6 +541,67 @@ def upload_config():
         return "Configuration updated successfully. Server is reloading...", 200
     except Exception as e:
         return f"Error processing config file: {e}", 400
+
+@app.route('/api/stations/babsonnexus/list', methods=['GET'])
+def list_babsonnexus_stations():
+    """Fetches the list of available station JSON files from the repository."""
+    try:
+        repo_api_url = "https://api.github.com/repos/babsonnexus/hdmi-encoder-native-apps/contents/roku_bridge_native/stations"
+        response = requests.get(repo_api_url, timeout=10)
+        response.raise_for_status()
+        files = response.json()
+
+        # Filter for JSON files and return just the names and direct download URLs
+        station_files = [{"name": f["name"], "download_url": f["download_url"]}
+                         for f in files if f['name'].endswith('.json') and f['type'] == 'file']
+
+        return jsonify({"status": "success", "files": station_files})
+    except Exception as e:
+        logging.error(f"Failed to fetch station list: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/stations/babsonnexus/import', methods=['POST'])
+def import_babsonnexus_stations():
+    """Downloads and merges only the user-selected station files."""
+    try:
+        selected_urls = request.json.get('urls', [])
+        if not selected_urls:
+            return jsonify({"status": "error", "message": "No stations selected."}), 400
+
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            current_config = json.load(f)
+
+        current_channels = {c.get('id'): c for c in current_config.get('channels', []) if c.get('id')}
+        current_epg = {c.get('id'): c for c in current_config.get('epg_channels', []) if c.get('id')}
+
+        downloaded = 0
+        for url in selected_urls:
+            station_res = requests.get(url, timeout=10)
+            if station_res.status_code == 200:
+                station_data = station_res.json()
+
+                for ch in station_data.get('channels', []):
+                    if ch.get('id'): current_channels[ch['id']] = ch
+                for epg in station_data.get('epg_channels', []):
+                    if epg.get('id'): current_epg[epg['id']] = epg
+
+                downloaded += 1
+
+        current_config['channels'] = list(current_channels.values())
+        current_config['epg_channels'] = list(current_epg.values())
+
+        with open(CONFIG_FILE_PATH, 'w') as f:
+            json.dump(current_config, f, indent=2)
+
+        load_config()
+        os.kill(os.getppid(), signal.SIGHUP)
+        return jsonify({
+            "status": "success",
+            "message": f"Successfully merged {downloaded} station files. Server reloading..."
+        })
+    except Exception as e:
+        logging.error(f"Babsonnexus station import failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/upload_plugin', methods=['POST'])
 def upload_plugin():
@@ -567,7 +692,7 @@ def api_pretune_stream():
 @app.route('/remote/launch/<device_ip>/<app_id>', methods=['POST'])
 def remote_launch(device_ip, app_id):
     try:
-        roku_session.post(f"http://{device_ip}:8060/launch/{app_id}")
+        roku_session.post(f"http://{device_ip}:8060/launch/{app_id}", timeout=5)
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -579,7 +704,7 @@ def remote_keypress(device_ip, key):
     if not any(t['roku_ip'] == device_ip for t in TUNERS) and not is_in_preview:
         return jsonify({"status": "error", "message": "Device not found or not in a session."}), 404
     try:
-        roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}")
+        roku_session.post(f"http://{device_ip}:8060/keypress/{urllib.parse.quote(key)}", timeout=5)
         return jsonify({"status": "success"})
     except requests.exceptions.RequestException as e:
         return jsonify({"status": "error", "message": str(e)}), 500
