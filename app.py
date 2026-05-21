@@ -9,10 +9,27 @@ import threading
 import httpx
 import urllib.parse
 import signal
+import shutil
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, Response, stream_with_context, render_template
 from werkzeug.utils import secure_filename
+
+# --- Persistent Plugin Synchronization ---
+CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
+USER_PLUGINS_DIR = os.path.join(CONFIG_DIR, 'plugins')
+APP_PLUGINS_DIR = os.path.join(os.path.dirname(__file__), 'plugins')
+
+# Ensure directories exist
+os.makedirs(USER_PLUGINS_DIR, exist_ok=True)
+os.makedirs(APP_PLUGINS_DIR, exist_ok=True)
+
+# Restore plugins from the persistent config volume to the app directory before loading
+for _filename in os.listdir(USER_PLUGINS_DIR):
+    if _filename.endswith('_plugin.py'):
+        _src = os.path.join(USER_PLUGINS_DIR, _filename)
+        _dst = os.path.join(APP_PLUGINS_DIR, _filename)
+        shutil.copy2(_src, _dst)
 
 # --- Import Plugin System ---
 from plugins import discovered_plugins
@@ -20,7 +37,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.7"
+APP_VERSION = "4.5.8"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -50,7 +67,6 @@ deque_handler.setFormatter(formatter)
 root_logger.addHandler(deque_handler)
 
 # --- Environment & Global Variables ---
-CONFIG_DIR = os.getenv('CONFIG_DIR', '/app/config')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, 'roku_channels.json')
 DEBUG_LOGGING_ENABLED = os.getenv('ENABLE_DEBUG_LOGGING', 'false').lower() == 'true'
 ENCODING_MODE = os.getenv('ENCODING_MODE', 'proxy').lower()
@@ -146,11 +162,11 @@ def send_key_sequence(device_ip, keys):
             if isinstance(key, str) and key.lower().startswith('wait='):
                 try: duration = float(key.split('=')[1]); time.sleep(duration); continue
                 except (ValueError, IndexError): logging.error(f"Invalid wait command: {key}"); continue
-            
+
             safe_key = f"Lit_{urllib.parse.quote(key)}" if len(key) == 1 else key
             roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}", timeout=5)
             if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
-            
+
             # Use a configurable delay if provided in the channel data, otherwise default
             custom_delay = next((float(k.split('=')[1]) for k in keys[i+1:] if isinstance(k, str) and k.startswith('delay=')), 0.5)
             time.sleep(custom_delay)
@@ -169,7 +185,6 @@ def send_key_sequence(device_ip, keys):
                         logging.error(f"Failed to send key '{key}' after multiple retries.")
                         return False # Abort sequence on persistent failure
     return True
-
 
 def keep_alive_sender(roku_ip, key_string, interval_minutes, stop_event):
     keys = [k.strip() for k in key_string.split(',')]
@@ -250,7 +265,6 @@ def start_preview_session(tuner_ip):
         return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip']}
 
 def stop_preview_session(tuner_ip):
-    # This function is now just a wrapper for release_tuner for clarity
     release_tuner(tuner_ip)
     return {"status": "success", "message": "Session stopped."}
 
@@ -313,10 +327,7 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
     for channel in filtered_list:
         stream_url = f"http://{request.host}/stream/{channel['id']}"
         extinf_line = f'#EXTINF:-1 channel-id="{channel["id"]}"'
-        
-        # --- START OF FIX ---
-        # Expanded the tags dictionary to include all possible custom EPG fields.
-        # This now also works for Gracenote channels to allow overrides.
+
         tags = {
             "tvg-name": "name",
             "channel-number": "channel-number",
@@ -332,11 +343,9 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
             "tvc-stream-vcodec": "tvc-stream-vcodec",
             "tvc-stream-acodec": "tvc-stream-acodec"
         }
-        # --- END OF FIX ---
 
         for tag, key in tags.items():
             if key in channel and channel[key]:
-                # For tags that can be comma-separated lists, ensure they are formatted correctly.
                 if isinstance(channel[key], list):
                     extinf_line += f' {tag}="{",".join(map(str, channel[key]))}"'
                 else:
@@ -344,10 +353,10 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
 
         if 'playlist' in channel and channel['playlist']:
             extinf_line += f' group-title="{channel["playlist"]}"'
-            
+
         extinf_line += f',{channel["name"]}'
         m3u_content.extend([extinf_line, stream_url])
-        
+
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
 @app.route('/channels.m3u')
@@ -374,10 +383,7 @@ def generate_ondemand_m3u():
         if ONDEMAND_SETTINGS.get('tvc_guide_art'):
             extinf_line += f' tvc-guide-art="{ONDEMAND_SETTINGS["tvc_guide_art"]}"'
 
-        # --- THIS IS THE FIX ---
         extinf_line += f',{channel_name}'
-        # --- END OF FIX ---
-
         m3u_content.extend([extinf_line, stream_url])
     return Response("\n".join(m3u_content), mimetype='audio/x-mpegurl')
 
@@ -420,14 +426,12 @@ def status_page():
     }
     return render_template('status.html', global_settings=settings)
 
-# --- UPDATED API ENDPOINT ---
 @app.route('/api/config', methods=['GET', 'POST'])
 def api_config():
     if request.method == 'POST':
         try:
             new_config = request.get_json()
-            
-            # --- START OF FIX: Sanitize Roku IP addresses ---
+
             if 'tuners' in new_config and isinstance(new_config['tuners'], list):
                 for tuner in new_config['tuners']:
                     if 'roku_ip' in tuner and isinstance(tuner['roku_ip'], str):
@@ -437,7 +441,6 @@ def api_config():
                         elif ip.startswith('https://'):
                             ip = ip[8:]
                         tuner['roku_ip'] = ip
-            # --- END OF FIX ---
 
             validated_config = {
                 "tuners": new_config.get("tuners", []),
@@ -473,7 +476,6 @@ def upload_config_merge():
         with open(CONFIG_FILE_PATH, 'r') as f:
             current_config = json.load(f)
 
-        # Merge lists by checking for existing IDs/Names
         for key in ['tuners', 'channels', 'epg_channels', 'ondemand_apps']:
             if key in new_config and isinstance(new_config[key], list):
                 current_list = current_config.get(key, [])
@@ -486,7 +488,6 @@ def upload_config_merge():
                         current_list.append(item)
                 current_config[key] = list(existing.values())
 
-        # Merge on-demand settings
         if 'ondemand_settings' in new_config:
             current_config['ondemand_settings'] = {**current_config.get('ondemand_settings', {}), **new_config['ondemand_settings']}
 
@@ -509,18 +510,18 @@ def sync_plugins():
         response.raise_for_status()
         files = response.json()
 
-        plugins_dir = os.path.join(os.path.dirname(__file__), 'plugins')
-        os.makedirs(plugins_dir, exist_ok=True)
         downloaded = 0
-
         for file_info in files:
             if file_info['name'].endswith('_plugin.py') and file_info['type'] == 'file':
                 raw_url = file_info['download_url']
                 plugin_res = requests.get(raw_url, timeout=10)
                 if plugin_res.status_code == 200:
-                    save_path = os.path.join(plugins_dir, file_info['name'])
+                    save_path = os.path.join(APP_PLUGINS_DIR, file_info['name'])
                     with open(save_path, 'wb') as f:
                         f.write(plugin_res.content)
+
+                    # Backup to the persistent volume
+                    shutil.copy2(save_path, os.path.join(USER_PLUGINS_DIR, file_info['name']))
                     downloaded += 1
 
         os.kill(os.getppid(), signal.SIGHUP)
@@ -552,7 +553,6 @@ def list_babsonnexus_stations():
         response.raise_for_status()
         files = response.json()
 
-        # Filter for JSON files and return just the names and direct download URLs
         station_files = [{"name": f["name"], "download_url": f["download_url"]}
                          for f in files if f['name'].endswith('.json') and f['type'] == 'file']
 
@@ -610,13 +610,15 @@ def upload_plugin():
     file = request.files['file']
     if file.filename == '' or not file.filename.endswith('_plugin.py'): return "Invalid file. Must be a '_plugin.py' file.", 400
     try:
-        plugins_dir = os.path.join(os.path.dirname(__file__), 'plugins')
-        os.makedirs(plugins_dir, exist_ok=True)
         filename = secure_filename(file.filename)
-        save_path = os.path.join(plugins_dir, filename)
-        if not os.path.normpath(save_path).startswith(os.path.abspath(plugins_dir)):
+        save_path = os.path.join(APP_PLUGINS_DIR, filename)
+        if not os.path.normpath(save_path).startswith(os.path.abspath(APP_PLUGINS_DIR)):
             return "Invalid filename", 400
         file.save(save_path)
+
+        # Backup to the persistent volume
+        shutil.copy2(save_path, os.path.join(USER_PLUGINS_DIR, filename))
+
         logging.info(f"New plugin uploaded: {filename}")
         os.kill(os.getppid(), signal.SIGHUP)
         return "Plugin uploaded successfully. Server is reloading...", 200
@@ -624,7 +626,6 @@ def upload_plugin():
         logging.error(f"Error saving plugin: {e}")
         return f"Error saving plugin file: {e}", 500
 
-# --- NEW Pre-Tune API ---
 @app.route('/api/preview/stop', methods=['POST'])
 def api_preview_stop():
     with TUNER_LOCK:
@@ -771,12 +772,10 @@ def api_status():
     tuner_configs = [{"name": t.get("name", t["roku_ip"]), "roku_ip": t["roku_ip"], "encoder_url": t["encoder_url"]} for t in TUNERS]
     return jsonify({"tuners": tuner_configs, "statuses": statuses})
 
-
 @app.route('/api/plugins')
 def api_plugins():
     plugin_list = [{"id": script_name, "name": plugin.app_name} for script_name, plugin in discovered_plugins.items()]
     return jsonify(plugin_list)
 
 if __name__ != '__main__':
-
     load_config()
