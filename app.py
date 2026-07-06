@@ -6,6 +6,7 @@ import os
 import requests
 import time
 import threading
+from threading import Timer
 import httpx
 import urllib.parse
 import signal
@@ -85,6 +86,7 @@ KEEP_ALIVE_TASKS = {}
 # --- NEW: Multi-session support for pre-tuning ---
 PREVIEW_SESSIONS = {} # Keyed by tuner IP
 SESSION_LOCK = threading.Lock()
+TUNER_TIMERS = {}
 
 roku_session = requests.Session()
 roku_session.timeout = 8 # Increased timeout for better reliability
@@ -116,16 +118,31 @@ def load_config():
     except Exception as e:
         logging.error(f"Error loading config: {e}")
 
-def lock_tuner():
+def lock_tuner_for_channel(channel_id):
     with TUNER_LOCK:
+        # 1. Check if a tuner is already playing this channel
+        for tuner in TUNERS:
+            if tuner.get('in_use') and tuner.get('current_channel') == channel_id:
+                tuner['viewers'] = tuner.get('viewers', 0) + 1
+                if tuner['roku_ip'] in TUNER_TIMERS:
+                    TUNER_TIMERS[tuner['roku_ip']].cancel()
+                    del TUNER_TIMERS[tuner['roku_ip']]
+                logging.info(f"Reusing tuner: {tuner.get('name')} for channel {channel_id}. Viewers: {tuner['viewers']}")
+                return tuner, False # False = No need to retune
+
+        # 2. If not, find a completely free tuner
         for tuner in TUNERS:
             if not tuner.get('in_use'):
                 tuner['in_use'] = True
-                if DEBUG_LOGGING_ENABLED: logging.info(f"Locked tuner: {tuner.get('name')}")
-                return tuner
-    return None
+                tuner['current_channel'] = channel_id
+                tuner['viewers'] = 1
+                if tuner['roku_ip'] in TUNER_TIMERS:
+                    TUNER_TIMERS[tuner['roku_ip']].cancel()
+                if DEBUG_LOGGING_ENABLED: logging.info(f"Locked new tuner: {tuner.get('name')} for channel {channel_id}")
+                return tuner, True # True = Needs tuning
+    return None, False
 
-def release_tuner(tuner_ip):
+def delayed_release(tuner_ip):
     if tuner_ip in KEEP_ALIVE_TASKS:
         thread, stop_event = KEEP_ALIVE_TASKS.pop(tuner_ip)
         stop_event.set()
@@ -136,21 +153,46 @@ def release_tuner(tuner_ip):
         if tuner_ip in PREVIEW_SESSIONS:
             was_in_preview = True
             del PREVIEW_SESSIONS[tuner_ip]
-            logging.info(f"Cleared preview session for tuner {tuner_ip}")
 
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
-                if tuner.get('in_use') or was_in_preview:
+                # Double-check that no one reconnected at the last millisecond
+                if tuner.get('viewers', 0) <= 0:
                     tuner['in_use'] = False
-                    logging.info(f"Released tuner: {tuner.get('name')}. Sending Home keypress.")
+                    tuner['current_channel'] = None
+                    logging.info(f"Grace period expired. Released tuner: {tuner.get('name')}. Sending Home keypress.")
                     try:
-                        # Send Home keypress multiple times for reliability
                         for _ in range(3):
                             roku_session.post(f"http://{tuner_ip}:8060/keypress/Home", timeout=2)
                             time.sleep(0.2)
                     except requests.exceptions.RequestException as e:
-                        logging.error(f"Failed to send Home keypress to {tuner_ip}: {e}")
+                        logging.error(f"Failed to send Home to {tuner_ip}: {e}")
+                break
+
+def release_tuner(tuner_ip, immediate=False):
+    with TUNER_LOCK:
+        for tuner in TUNERS:
+            if tuner.get('roku_ip') == tuner_ip:
+                if immediate:
+                    tuner['viewers'] = 0
+                else:
+                    tuner['viewers'] = tuner.get('viewers', 1) - 1
+                
+                logging.info(f"Client disconnected from {tuner.get('name')}. Viewers left: {tuner['viewers']}")
+                
+                if tuner['viewers'] <= 0:
+                    tuner['viewers'] = 0
+                    delay = 0.1 if immediate else 15.0 # 15 second grace period
+                    if not immediate:
+                        logging.info(f"Starting {delay}-second grace period for {tuner.get('name')}.")
+                    
+                    if tuner_ip in TUNER_TIMERS:
+                        TUNER_TIMERS[tuner_ip].cancel()
+                        
+                    timer = threading.Timer(delay, delayed_release, args=[tuner_ip])
+                    TUNER_TIMERS[tuner_ip] = timer
+                    timer.start()
                 break
 
 def send_key_sequence(device_ip, keys):
@@ -253,19 +295,22 @@ def stream_generator(encoder_url, roku_ip_to_release, mode='proxy', blank_durati
 def start_preview_session(tuner_ip):
     with TUNER_LOCK:
         tuner = next((t for t in TUNERS if t['roku_ip'] == tuner_ip), None)
-        if not tuner:
-            return {"status": "error", "message": "Tuner not found."}
-        if tuner.get('in_use'):
-            return {"status": "error", "message": "Tuner is already in use."}
+        if not tuner: return {"status": "error", "message": "Tuner not found."}
+        if tuner.get('in_use'): return {"status": "error", "message": "Tuner is already in use."}
         tuner['in_use'] = True
-
+        tuner['current_channel'] = 'pretune'
+        tuner['viewers'] = 1
+        if tuner_ip in TUNER_TIMERS:
+            TUNER_TIMERS[tuner_ip].cancel()
+            del TUNER_TIMERS[tuner_ip]
+            
     with SESSION_LOCK:
         PREVIEW_SESSIONS[tuner_ip] = {'tuner': tuner, 'committed': False}
         logging.info(f"Started preview session on tuner {tuner['name']}")
         return {"status": "success", "tuner_name": tuner['name'], "roku_ip": tuner['roku_ip']}
 
 def stop_preview_session(tuner_ip):
-    release_tuner(tuner_ip)
+    release_tuner(tuner_ip, immediate=True)
     return {"status": "success", "message": "Session stopped."}
 
 def commit_preview_session(tuner_ip):
@@ -276,26 +321,38 @@ def commit_preview_session(tuner_ip):
         tuner_name = PREVIEW_SESSIONS[tuner_ip]['tuner']['name']
         logging.info(f"Committed preview session for tuner {tuner_name}.")
         return {"status": "success", "message": "Stream is now ready for Channels DVR."}
-
+        
 @app.route('/stream/<channel_id>')
 def stream_channel(channel_id):
+    # 1. Evaluate preview flag and execute the new channel-aware lock
     is_preview = request.args.get('preview', 'false').lower() == 'true'
-    locked_tuner = lock_tuner()
-    if not locked_tuner: return "All tuners are in use.", 503
+    locked_tuner, needs_tuning = lock_tuner_for_channel(channel_id)
+    
+    if not locked_tuner: 
+        return "All tuners are in use.", 503
+
+    # 2. Validate channel existence
     channel_data = next((c for c in CHANNELS + EPG_CHANNELS if c["id"] == channel_id), None)
     if not channel_data:
-        release_tuner(locked_tuner['roku_ip'])
+        release_tuner(locked_tuner['roku_ip'], immediate=True) # Immediate release applied correctly
         return "Channel not found.", 404
-    executor.submit(execute_tuning_in_background, locked_tuner['roku_ip'], channel_data)
-    if channel_data.get('keep_alive_enabled') and channel_data.get('keep_alive_key'):
-        interval = channel_data.get('keep_alive_interval', 225)
-        stop_event = threading.Event()
-        thread = threading.Thread(target=keep_alive_sender, args=(locked_tuner['roku_ip'], channel_data['keep_alive_key'], interval, stop_event))
-        thread.daemon = True
-        thread.start()
-        KEEP_ALIVE_TASKS[locked_tuner['roku_ip']] = (thread, stop_event)
+        
+    # 3. Only execute background tuning if the tuner wasn't reused from the grace period
+    if needs_tuning:
+        executor.submit(execute_tuning_in_background, locked_tuner['roku_ip'], channel_data)
+        if channel_data.get('keep_alive_enabled') and channel_data.get('keep_alive_key'):
+            interval = channel_data.get('keep_alive_interval', 225)
+            stop_event = threading.Event()
+            thread = threading.Thread(target=keep_alive_sender, args=(locked_tuner['roku_ip'], channel_data['keep_alive_key'], interval, stop_event))
+            thread.daemon = True
+            thread.start()
+            KEEP_ALIVE_TASKS[locked_tuner['roku_ip']] = (thread, stop_event)
+            
     tuner_mode = locked_tuner.get('encoding_mode', ENCODING_MODE)
-    blank_duration = 0 if is_preview else channel_data.get('blank_duration', 0)
+    
+    # 4. Only blank the screen if we are actually tuning a fresh stream
+    blank_duration = 0 if (is_preview or not needs_tuning) else channel_data.get('blank_duration', 0)
+    
     generator = stream_generator(locked_tuner['encoder_url'], locked_tuner['roku_ip'], tuner_mode, blank_duration)
     return Response(stream_with_context(generator), mimetype='video/mpeg')
 
@@ -633,7 +690,7 @@ def api_preview_stop():
             with SESSION_LOCK:
                 is_in_preview_session = tuner['roku_ip'] in PREVIEW_SESSIONS
             if tuner['in_use'] and not is_in_preview_session:
-                release_tuner(tuner['roku_ip'])
+                release_tuner(tuner['roku_ip'], immediate=True) # <-- Add immediate=True
                 return jsonify({"status": "success", "message": f"Released tuner {tuner.get('name')}"})
     return jsonify({"status": "error", "message": "No active preview stream tuner found to release."})
 
