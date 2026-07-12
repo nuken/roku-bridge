@@ -38,7 +38,7 @@ from plugins import discovered_plugins
 app = Flask(__name__)
 
 # --- Application Version ---
-APP_VERSION = "4.5.9"
+APP_VERSION = "4.6.0"
 
 # --- Disable caching ---
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -389,6 +389,7 @@ def generate_m3u_from_channels(channel_list, playlist_filter=None):
             "tvg-name": "name",
             "channel-number": "channel-number",
             "tvg-logo": "tvg-logo",
+            "tvg-shift": "tvg-shift",
             "tvc-guide-stationid": "tvc_guide_stationid",
             "tvc-guide-art": "tvc-guide-art",
             "tvc-guide-title": "tvc-guide-title",
