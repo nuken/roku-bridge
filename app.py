@@ -108,7 +108,9 @@ def load_config():
     try:
         with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f) or {}
         TUNERS = sorted(config_data.get('tuners', []), key=lambda x: x.get('priority', 99))
-        for tuner in TUNERS: tuner['in_use'] = False
+        for tuner in TUNERS: 
+            tuner['in_use'] = False
+            tuner['abort_tuning'] = threading.Event()
         CHANNELS = config_data.get('channels', [])
         EPG_CHANNELS = config_data.get('epg_channels', [])
         ONDEMAND_APPS = config_data.get('ondemand_apps', [])
@@ -136,6 +138,12 @@ def lock_tuner_for_channel(channel_id):
                 tuner['in_use'] = True
                 tuner['current_channel'] = channel_id
                 tuner['viewers'] = 1
+                
+                # Ensure the event exists and is cleared for the new session
+                if 'abort_tuning' not in tuner: 
+                    tuner['abort_tuning'] = threading.Event()
+                tuner['abort_tuning'].clear() # <-- NEW: Clear the abort flag
+                
                 if tuner['roku_ip'] in TUNER_TIMERS:
                     TUNER_TIMERS[tuner['roku_ip']].cancel()
                 if DEBUG_LOGGING_ENABLED: logging.info(f"Locked new tuner: {tuner.get('name')} for channel {channel_id}")
@@ -157,8 +165,8 @@ def delayed_release(tuner_ip):
     with TUNER_LOCK:
         for tuner in TUNERS:
             if tuner.get('roku_ip') == tuner_ip:
-                # Double-check that no one reconnected at the last millisecond
                 if tuner.get('viewers', 0) <= 0:
+                    tuner['abort_tuning'].set() # <-- NEW: Stop background tuning instantly
                     tuner['in_use'] = False
                     tuner['current_channel'] = None
                     logging.info(f"Grace period expired. Released tuner: {tuner.get('name')}. Sending Home keypress.")
@@ -176,6 +184,7 @@ def release_tuner(tuner_ip, immediate=False):
             if tuner.get('roku_ip') == tuner_ip:
                 if immediate:
                     tuner['viewers'] = 0
+                    tuner['abort_tuning'].set() # <-- NEW: Stop tuning if explicit stop is pressed
                 else:
                     tuner['viewers'] = tuner.get('viewers', 1) - 1
                 
@@ -195,15 +204,25 @@ def release_tuner(tuner_ip, immediate=False):
                     timer.start()
                 break
 
-def send_key_sequence(device_ip, keys):
+def send_key_sequence(device_ip, keys, abort_event=None): # <-- Pass event here
     for i, key in enumerate(keys):
+        # <-- NEW: Check if we should abort before processing the next key
+        if abort_event and abort_event.is_set():
+            logging.info(f"Tuning aborted for {device_ip} during key sequence.")
+            return False 
+
         try:
             if isinstance(key, dict) and 'wait' in key:
-                time.sleep(float(key['wait']))
+                if abort_event and abort_event.wait(float(key['wait'])): return False # Replace sleep
                 continue
             if isinstance(key, str) and key.lower().startswith('wait='):
-                try: duration = float(key.split('=')[1]); time.sleep(duration); continue
-                except (ValueError, IndexError): logging.error(f"Invalid wait command: {key}"); continue
+                try: 
+                    duration = float(key.split('=')[1])
+                    if abort_event and abort_event.wait(duration): return False # Replace sleep
+                    continue
+                except (ValueError, IndexError): 
+                    logging.error(f"Invalid wait command: {key}")
+                    continue
 
             safe_key = f"Lit_{urllib.parse.quote(key)}" if len(key) == 1 else key
             roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}", timeout=5)
@@ -211,7 +230,8 @@ def send_key_sequence(device_ip, keys):
 
             # Use a configurable delay if provided in the channel data, otherwise default
             custom_delay = next((float(k.split('=')[1]) for k in keys[i+1:] if isinstance(k, str) and k.startswith('delay=')), 0.5)
-            time.sleep(custom_delay)
+            
+            if abort_event and abort_event.wait(custom_delay): return False # Replace sleep
 
         except requests.exceptions.RequestException as e:
             logging.error(f"Failed to send key '{key}' to {device_ip}: {e}")
@@ -238,20 +258,24 @@ def keep_alive_sender(roku_ip, key_string, interval_minutes, stop_event):
         except Exception as e:
             logging.error(f"[Keep-Alive] Error sending key sequence to {roku_ip}: {e}")
 
-def execute_tuning_in_background(roku_ip, channel_data):
+def execute_tuning_in_background(roku_ip, channel_data, abort_event=None): # <-- Pass event here
     try:
         if DEBUG_LOGGING_ENABLED: logging.info(f"Tuning to actual channel {channel_data['name']}...")
         launch_url = f"http://{roku_ip}:8060/launch/{channel_data['roku_app_id']}"
         roku_session.post(launch_url, timeout=5)
-        time.sleep(channel_data.get("tune_delay", 1))
+        
+        # Replace time.sleep with interruptible wait
+        if abort_event and abort_event.wait(channel_data.get("tune_delay", 1)): return 
+        
         plugin_script = channel_data.get('plugin_script')
         key_sequence = channel_data.get('key_sequence')
+        
         if plugin_script and plugin_script in discovered_plugins:
             plugin = discovered_plugins[plugin_script]
             final_sequence = plugin.tune_channel(roku_ip, channel_data)
-            if final_sequence: send_key_sequence(roku_ip, final_sequence)
+            if final_sequence: send_key_sequence(roku_ip, final_sequence, abort_event) # Pass event
         elif key_sequence:
-            send_key_sequence(roku_ip, key_sequence)
+            send_key_sequence(roku_ip, key_sequence, abort_event) # Pass event
         else:
             content_id = channel_data.get('deep_link_content_id')
             if content_id:
@@ -259,8 +283,8 @@ def execute_tuning_in_background(roku_ip, channel_data):
                 params = f"?contentId={content_id}&mediaType={media_type}"
                 roku_session.post(f"{launch_url}{params}", timeout=5)
         if channel_data.get('needs_select_keypress'):
-            time.sleep(1)
-            send_key_sequence(roku_ip, ["Select"])
+            if abort_event and abort_event.wait(1): return # Replace sleep
+            send_key_sequence(roku_ip, ["Select"], abort_event) # Pass event
     except Exception as e:
         logging.error(f"Error during background tuning for {roku_ip}: {e}")
 
@@ -339,7 +363,8 @@ def stream_channel(channel_id):
         
     # 3. Only execute background tuning if the tuner wasn't reused from the grace period
     if needs_tuning:
-        executor.submit(execute_tuning_in_background, locked_tuner['roku_ip'], channel_data)
+        # <-- NEW: Pass the tuner's abort_tuning event into the executor
+        executor.submit(execute_tuning_in_background, locked_tuner['roku_ip'], channel_data, locked_tuner['abort_tuning'])
         if channel_data.get('keep_alive_enabled') and channel_data.get('keep_alive_key'):
             interval = channel_data.get('keep_alive_interval', 225)
             stop_event = threading.Event()
