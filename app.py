@@ -105,7 +105,7 @@ def load_config():
                 json.dump({"tuners": [], "channels": [], "epg_channels": [], "ondemand_apps": [], "ondemand_settings": {}}, f, indent=2)
         except Exception as e:
             logging.error(f"Could not create default config: {e}")
-   try:
+    try:
         with open(CONFIG_FILE_PATH, 'r') as f: config_data = json.load(f) or {}
         TUNERS = sorted(config_data.get('tuners', []), key=lambda x: x.get('priority', 99))
         for tuner in TUNERS: 
