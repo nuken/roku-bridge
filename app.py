@@ -206,20 +206,25 @@ def release_tuner(tuner_ip, immediate=False):
 
 def send_key_sequence(device_ip, keys, abort_event=None): 
     for i, key in enumerate(keys):
-        # NEW: Check if we should abort before processing the next key
+        # Catch an abort right before a new key is pressed
         if abort_event and abort_event.is_set():
             logging.info(f"Tuning aborted for {device_ip} during key sequence.")
             return False 
 
         try:
             if isinstance(key, dict) and 'wait' in key:
-                if abort_event and abort_event.wait(float(key['wait'])): return False 
+                if abort_event and abort_event.wait(float(key['wait'])): 
+                    logging.info(f"Tuning aborted for {device_ip} during wait command.")
+                    return False 
                 elif not abort_event: time.sleep(float(key['wait']))
                 continue
+                
             if isinstance(key, str) and key.lower().startswith('wait='):
                 try: 
                     duration = float(key.split('=')[1])
-                    if abort_event and abort_event.wait(duration): return False 
+                    if abort_event and abort_event.wait(duration): 
+                        logging.info(f"Tuning aborted for {device_ip} during inline wait.")
+                        return False 
                     elif not abort_event: time.sleep(duration)
                     continue
                 except (ValueError, IndexError): 
@@ -230,10 +235,12 @@ def send_key_sequence(device_ip, keys, abort_event=None):
             roku_session.post(f"http://{device_ip}:8060/keypress/{safe_key}", timeout=5)
             if DEBUG_LOGGING_ENABLED: logging.info(f"Sent key '{key}' to {device_ip}")
 
-            # Use a configurable delay if provided in the channel data, otherwise default
             custom_delay = next((float(k.split('=')[1]) for k in keys[i+1:] if isinstance(k, str) and k.startswith('delay=')), 0.5)
             
-            if abort_event and abort_event.wait(custom_delay): return False
+            # Catch an abort during the post-keypress delay
+            if abort_event and abort_event.wait(custom_delay): 
+                logging.info(f"Tuning aborted for {device_ip} during key delay.")
+                return False
             elif not abort_event: time.sleep(custom_delay)
 
         except requests.exceptions.RequestException as e:
